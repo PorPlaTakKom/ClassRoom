@@ -392,6 +392,22 @@ export default function Classroom() {
           dynacast: true
         });
 
+        const setTeacherTrack = (publication, track) => {
+          if (publication.source === Track.Source.ScreenShare) {
+            setTeacherScreenTrack(track);
+          } else if (publication.source === Track.Source.Camera) {
+            setTeacherCameraTrack(track);
+          }
+        };
+
+        const clearTeacherTrack = (publication) => {
+          if (publication.source === Track.Source.ScreenShare) {
+            setTeacherScreenTrack(null);
+          } else if (publication.source === Track.Source.Camera) {
+            setTeacherCameraTrack(null);
+          }
+        };
+
         const removeStudentTrack = (participantSid, trackSid) => {
           setRemoteVideoStreams((prev) =>
             prev.filter((item) => item.id !== `${participantSid}-${trackSid}`)
@@ -417,11 +433,10 @@ export default function Classroom() {
           }
           if (track.kind === Track.Kind.Video) {
             if (role === "Teacher") {
-              if (publication.source === Track.Source.ScreenShare) {
-                setTeacherScreenTrack(track);
-              } else if (publication.source === Track.Source.Camera) {
-                setTeacherCameraTrack(track);
-              }
+              setTeacherTrack(publication, track);
+              track.on(TrackEvent.Muted, () => clearTeacherTrack(publication));
+              track.on(TrackEvent.Unmuted, () => setTeacherTrack(publication, track));
+              track.on(TrackEvent.Ended, () => clearTeacherTrack(publication));
             } else if (currentUser.role === "Teacher" && role === "Student") {
               addStudentTrack(participant, track);
               track.on(TrackEvent.Muted, () => removeStudentTrack(participant.sid, track.sid));
@@ -438,11 +453,7 @@ export default function Classroom() {
           }
           if (track.kind === Track.Kind.Video) {
             if (role === "Teacher") {
-              if (publication.source === Track.Source.ScreenShare) {
-                setTeacherScreenTrack(null);
-              } else if (publication.source === Track.Source.Camera) {
-                setTeacherCameraTrack(null);
-              }
+              clearTeacherTrack(publication);
             } else if (currentUser.role === "Teacher" && role === "Student") {
               removeStudentTrack(participant.sid, track.sid);
             }
@@ -457,16 +468,24 @@ export default function Classroom() {
           }
           if (publication.kind === Track.Kind.Video) {
             if (role === "Teacher") {
-              if (publication.source === Track.Source.ScreenShare) {
-                setTeacherScreenTrack(null);
-              } else if (publication.source === Track.Source.Camera) {
-                setTeacherCameraTrack(null);
-              }
+              clearTeacherTrack(publication);
             } else if (currentUser.role === "Teacher" && role === "Student") {
               setRemoteVideoStreams((prev) =>
                 prev.filter((item) => !item.id.startsWith(`${participant.sid}-`))
               );
             }
+          }
+        });
+
+        lkRoom.on(RoomEvent.TrackMuted, (publication, participant) => {
+          if (participant?.metadata !== "Teacher") return;
+          clearTeacherTrack(publication);
+        });
+
+        lkRoom.on(RoomEvent.TrackUnmuted, (publication, participant) => {
+          if (participant?.metadata !== "Teacher") return;
+          if (publication.track) {
+            setTeacherTrack(publication, publication.track);
           }
         });
 
