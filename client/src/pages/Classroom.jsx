@@ -230,9 +230,6 @@ export default function Classroom({ user }) {
 
     const handlePendingNotify = (payload) => {
       setPending(payload.pending);
-      if (currentUser.role === "Teacher" && payload.pending?.length) {
-        playNotification();
-      }
     };
 
     const handleApprovedList = (payload) => {

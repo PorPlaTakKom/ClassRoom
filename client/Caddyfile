@@ -3,18 +3,20 @@
 }
 
 {$DOMAIN:localhost} {
+
   encode gzip
 
-  @livekit path /rtc /rtc/* /twirp/*
-  handle @livekit {
-    reverse_proxy livekit:7880
+  # LiveKit signaling + WebSocket (ต้องเป็น root)
+  @livekit {
+    not path /api/* /socket.io/* /metrics
   }
+  reverse_proxy @livekit livekit:7880
 
-  @api path /api/* /socket.io/*
-  handle @api {
-    reverse_proxy server:4000
-  }
+  # Backend API + Socket.IO
+  @api path /api/* /socket.io/* /metrics
+  reverse_proxy @api server:4000
 
+  # Frontend (React build)
   handle {
     root * /srv
     try_files {path} /index.html
