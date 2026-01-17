@@ -3,29 +3,20 @@ version: "3.9"
 services:
   livekit:
     image: livekit/livekit-server:v1.6.2
-    command: >
-      /bin/sh -c "cat > /etc/livekit.yaml <<EOF
-      port: 7880
-      rtc:
-        tcp_port: 7881
-        port_range_start: 50000
-        port_range_end: 51000
-      keys:
-        ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
-      EOF
-      livekit-server --config /etc/livekit.yaml"
+    container_name: livekit
+    command: livekit-server
     environment:
-      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
-      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      LIVEKIT_KEYS: ${LIVEKIT_KEYS}
     ports:
-      - "7880:7880"
-      - "7881:7881"
-      - "50000-51000:50000-51000/udp"
+      - "7880:7880"                     # HTTP / WS
+      - "7881:7881"                     # TCP RTC fallback
+      - "50000-51000:50000-51000/udp"   # UDP media
     restart: unless-stopped
 
   server:
     build:
       context: ./server
+    container_name: backend
     environment:
       NODE_ENV: production
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
@@ -35,13 +26,15 @@ services:
       - livekit
     expose:
       - "4000"
+    restart: unless-stopped
 
   client:
     build:
       context: ./client
+    container_name: frontend
     environment:
-      DOMAIN: ${DOMAIN:-localhost}
-      ACME_EMAIL: ${ACME_EMAIL:-}
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
     ports:
       - "80:80"
       - "443:443"
@@ -50,6 +43,7 @@ services:
     volumes:
       - caddy_data:/data
       - caddy_config:/config
+    restart: unless-stopped
 
 volumes:
   caddy_data:

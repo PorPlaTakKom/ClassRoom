@@ -209,7 +209,6 @@ export default function Classroom({ user }) {
 
     const handleConnect = () => {
       setConnected(true);
-      localSocketIdRef.current = socket.id;
       if (currentUser.role === "Teacher") {
         socket.emit("join-room", {
           roomId,
