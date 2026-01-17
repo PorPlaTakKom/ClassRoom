@@ -40,15 +40,10 @@ const RemoteVideo = memo(function RemoteVideo({ track, className, videoRef: exte
   return <video ref={videoRef} className={className} autoPlay muted playsInline />;
 });
 
-const formatFileSize = (bytes) => {
-  if (bytes >= 1024 * 1024) {
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
-  if (bytes >= 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  }
-  return `${bytes} B`;
-};
+const getParticipantName = (participant) =>
+  participant?.name || participant?.identity || "";
+
+const normalizeName = (name) => (name ? name.trim().toLowerCase() : "");
 
 function AudioPlayer({ track }) {
   const audioRef = useRef(null);
@@ -83,7 +78,6 @@ export default function Classroom({ user }) {
   const [approvedList, setApprovedList] = useState([]);
   const [messages, setMessages] = useState([]);
   const [message, setMessage] = useState("");
-  const [connected, setConnected] = useState(false);
   const [files, setFiles] = useState([]);
   const [uploadStatus, setUploadStatus] = useState("");
   const [isSharing, setIsSharing] = useState(false);
@@ -92,7 +86,6 @@ export default function Classroom({ user }) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [canShareScreen, setCanShareScreen] = useState(true);
   const audioCtxRef = useRef(null);
-  const [audioReady, setAudioReady] = useState(false);
   const [classClosed, setClassClosed] = useState(false);
   const [networkStatus, setNetworkStatus] = useState(() =>
     typeof navigator !== "undefined" && navigator.onLine ? "online" : "offline"
@@ -101,8 +94,6 @@ export default function Classroom({ user }) {
   const [saveData, setSaveData] = useState(false);
   const [micEnabled, setMicEnabled] = useState(false);
   const [micError, setMicError] = useState("");
-  const [micAvailable, setMicAvailable] = useState(true);
-  const [micPermission, setMicPermission] = useState("unknown");
   const [mediaPermission, setMediaPermission] = useState("unknown");
   const [needsMediaAccess, setNeedsMediaAccess] = useState(false);
   const [speakingMap, setSpeakingMap] = useState({});
@@ -220,7 +211,6 @@ export default function Classroom({ user }) {
     const socket = getSocket();
 
     const handleConnect = () => {
-      setConnected(true);
       if (currentUser.role === "Teacher") {
         socket.emit("join-room", {
           roomId,
@@ -234,7 +224,7 @@ export default function Classroom({ user }) {
       }
     };
 
-    const handleDisconnect = () => setConnected(false);
+    const handleDisconnect = () => {};
 
     const handleJoinRequest = (payload) => {
       setPending(payload.pending);
@@ -313,7 +303,7 @@ export default function Classroom({ user }) {
       socket.off("student-approved", handleStudentApproved);
       socket.off("class-closed", handleClassClosed);
     };
-  }, [room, roomId, currentUser, needsJoinProfile, needsMediaAccess, mediaPermission]);
+  }, [room, roomId, currentUser, needsJoinProfile]);
 
   useEffect(() => {
     const supportsDisplayMedia = Boolean(
@@ -338,33 +328,6 @@ export default function Classroom({ user }) {
       navigator.connection.addEventListener("change", updateConnectionType);
     }
 
-    const checkMic = async () => {
-      if (!navigator.mediaDevices?.enumerateDevices) {
-        setMicAvailable(false);
-        return;
-      }
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const hasMic = devices.some((device) => device.kind === "audioinput");
-        setMicAvailable(hasMic);
-        if (!hasMic) return;
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          stream.getTracks().forEach((track) => track.stop());
-          setMicPermission("granted");
-        } catch (error) {
-          if (error?.name === "NotAllowedError") {
-            setMicPermission("denied");
-          } else {
-            setMicPermission("unknown");
-          }
-        }
-      } catch (error) {
-        setMicAvailable(false);
-      }
-    };
-
-    checkMic();
     const unlockAudio = () => {
       try {
         if (!audioCtxRef.current) {
@@ -372,9 +335,9 @@ export default function Classroom({ user }) {
         }
         const ctx = audioCtxRef.current;
         if (ctx.state === "suspended") {
-          ctx.resume().then(() => setAudioReady(true)).catch(() => {});
+          ctx.resume().catch(() => {});
         } else {
-          setAudioReady(true);
+          // Audio is ready.
         }
       } catch (error) {
         // Ignore autoplay restrictions.
@@ -453,7 +416,7 @@ export default function Classroom({ user }) {
                 if (prev.some((item) => item.id === key)) return prev;
                 return [
                   ...prev,
-                  { id: key, track, name: participant.name || participant.identity }
+                  { id: key, track, name: getParticipantName(participant) }
                 ];
               });
             }
@@ -505,14 +468,14 @@ export default function Classroom({ user }) {
         lkRoom.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
           const next = {};
           speakers.forEach((participant) => {
-            const name = participant.name || participant.identity;
+            const name = normalizeName(getParticipantName(participant));
             if (name) {
-              next[name.toLowerCase()] = true;
+              next[name] = true;
             }
           });
           setSpeakingMap(next);
           if (currentUser?.name) {
-            setIsSpeaking(Boolean(next[currentUser.name.toLowerCase()]));
+            setIsSpeaking(Boolean(next[normalizeName(currentUser.name)]));
           }
         });
 
@@ -1224,7 +1187,7 @@ export default function Classroom({ user }) {
                       <span
                         key={entry.socketId}
                         className={`rounded-full border px-2 py-0.5 text-[11px] ${
-                          speakingMap[entry.user?.name?.toLowerCase()]
+                          speakingMap[normalizeName(entry.user?.name)]
                             ? "border-emerald-300 bg-emerald-100 text-emerald-800 animate-pulse"
                             : "border-ink-900/10 bg-white/70 text-ink-800"
                         }`}
@@ -1280,7 +1243,7 @@ export default function Classroom({ user }) {
                         <span
                           key={entry.socketId}
                           className={`rounded-full border px-3 py-1 text-xs ${
-                            speakingMap[entry.user?.name?.toLowerCase()]
+                            speakingMap[normalizeName(entry.user?.name)]
                               ? "border-emerald-300 bg-emerald-100 text-emerald-800 animate-pulse"
                               : "border-ink-900/10 bg-white/70 text-ink-800"
                           }`}
