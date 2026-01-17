@@ -95,6 +95,8 @@ export default function Classroom({ user }) {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const peerConnectionsRef = useRef(new Map());
+  const peerRolesRef = useRef(new Map());
+  const localSocketIdRef = useRef(null);
   const screenStreamRef = useRef(null);
   const [room, setRoom] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -255,6 +257,7 @@ export default function Classroom({ user }) {
 
     const handleConnect = () => {
       setConnected(true);
+      localSocketIdRef.current = socket.id;
       if (currentUser.role === "Teacher") {
         socket.emit("join-room", {
           roomId,
@@ -287,7 +290,7 @@ export default function Classroom({ user }) {
       payload.approved?.forEach((entry) => {
         if (!entry?.socketId) return;
         if (peerConnectionsRef.current.has(entry.socketId)) return;
-        const peer = createPeer(entry.socketId);
+        const peer = createPeer(entry.socketId, "Student");
         attachScreenTracks(peer);
         attachMicTracks(peer);
         attachCameraTracks(peer);
@@ -307,7 +310,7 @@ export default function Classroom({ user }) {
       if (currentUser.role !== "Teacher") return;
       if (!payload?.socketId) return;
       if (peerConnectionsRef.current.has(payload.socketId)) return;
-      const peer = createPeer(payload.socketId);
+      const peer = createPeer(payload.socketId, "Student");
       attachScreenTracks(peer);
       attachMicTracks(peer);
       attachCameraTracks(peer);
@@ -330,10 +333,12 @@ export default function Classroom({ user }) {
 
     const handleWebRtcOffer = async (payload) => {
       const socket = getSocket();
-      const peer = createPeer(payload.from);
+      const peer = createPeer(payload.from, payload.fromRole);
       await peer.setRemoteDescription(payload.offer);
       attachMicTracks(peer);
-      attachCameraTracks(peer);
+      if (currentUser?.role === "Teacher" || payload.fromRole === "Teacher") {
+        attachCameraTracks(peer);
+      }
       const answer = await peer.createAnswer();
       await peer.setLocalDescription(answer);
       socket.emit("webrtc-answer", {
@@ -369,6 +374,7 @@ export default function Classroom({ user }) {
 
     const handleCameraStop = (payload) => {
       if (currentUser?.role === "Student") {
+        if (!payload?.isTeacher) return;
         if (remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = null;
         }
@@ -536,6 +542,26 @@ export default function Classroom({ user }) {
   }, []);
 
   useEffect(() => {
+    if (currentUser?.role !== "Student") return;
+    if (!approved) return;
+    if (approvedList.length === 0) return;
+    const socket = getSocket();
+    const localId = socket.id || localSocketIdRef.current;
+    if (!localId) return;
+    approvedList.forEach((entry) => {
+      if (!entry?.socketId) return;
+      if (entry.socketId === localId) return;
+      if (peerConnectionsRef.current.has(entry.socketId)) return;
+      const peer = createPeer(entry.socketId, "Student");
+      const shouldOffer = localId > entry.socketId;
+      if (shouldOffer) {
+        attachMicTracks(peer);
+        forceOffer(peer, entry.socketId);
+      }
+    });
+  }, [approved, approvedList, currentUser]);
+
+  useEffect(() => {
     const handleFullscreenChange = () => {
       setIsFullscreen(Boolean(document.fullscreenElement));
     };
@@ -571,13 +597,16 @@ export default function Classroom({ user }) {
     });
   }, [isSpeaking, micEnabled, currentUser, roomId]);
 
-  const createPeer = (targetId) => {
+  const createPeer = (targetId, peerRole) => {
     if (peerConnectionsRef.current.has(targetId)) {
       return peerConnectionsRef.current.get(targetId);
     }
     const socket = getSocket();
     const peer = new RTCPeerConnection(RTC_CONFIG);
     peerConnectionsRef.current.set(targetId, peer);
+    if (peerRole) {
+      peerRolesRef.current.set(targetId, peerRole);
+    }
 
     peer.ontrack = (event) => {
       const [stream] = event.streams;
@@ -628,7 +657,8 @@ export default function Classroom({ user }) {
         socket.emit("webrtc-offer", {
           targetId,
           offer,
-          roomId
+          roomId,
+          fromRole: currentUser?.role
         });
       } catch (error) {
         console.warn("Negotiation failed", error);
@@ -678,7 +708,12 @@ export default function Classroom({ user }) {
     try {
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
-      socket.emit("webrtc-offer", { targetId, offer, roomId });
+      socket.emit("webrtc-offer", {
+        targetId,
+        offer,
+        roomId,
+        fromRole: currentUser?.role
+      });
     } catch (error) {
       // Ignore failed offers.
     }
@@ -839,7 +874,11 @@ export default function Classroom({ user }) {
         localCameraRef.current.srcObject = stream;
       }
       setCameraEnabled(true);
-      peerConnectionsRef.current.forEach((peer) => {
+      peerConnectionsRef.current.forEach((peer, peerId) => {
+        if (currentUser?.role === "Student") {
+          const peerRole = peerRolesRef.current.get(peerId);
+          if (peerRole !== "Teacher") return;
+        }
         attachCameraTracks(peer);
       });
     } catch (error) {
@@ -1428,11 +1467,16 @@ export default function Classroom({ user }) {
                 <p className="text-xs font-semibold text-ink-600">กล้องนักเรียน</p>
                 <div className="mt-3 grid grid-cols-2 gap-3">
                   {remoteVideoStreams.map((item) => (
-                    <RemoteVideo
-                      key={item.id}
-                      className="h-24 w-full rounded-xl object-cover"
-                      stream={item.stream}
-                    />
+                    <div key={item.id} className="relative">
+                      <RemoteVideo
+                        className="h-24 w-full rounded-xl object-cover"
+                        stream={item.stream}
+                      />
+                      <span className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-black/50 px-2 py-0.5 text-[10px] text-white">
+                        {approvedList.find((entry) => entry.socketId === item.socketId)?.user?.name ||
+                          "Student"}
+                      </span>
+                    </div>
                   ))}
                 </div>
               </div>

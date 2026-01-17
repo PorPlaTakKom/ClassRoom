@@ -401,13 +401,14 @@ io.on("connection", (socket) => {
     });
   });
 
-  socket.on("webrtc-offer", ({ targetId, offer, roomId }) => {
+  socket.on("webrtc-offer", ({ targetId, offer, roomId, fromRole }) => {
     console.log(`[SOCKET] webrtc-offer ${roomId} -> ${targetId}`);
     if (!targetId || !offer) return;
     io.to(targetId).emit("webrtc-offer", {
       from: socket.id,
       offer,
-      roomId
+      roomId,
+      fromRole
     });
   });
 
@@ -438,7 +439,12 @@ io.on("connection", (socket) => {
   socket.on("camera-stop", ({ roomId }) => {
     console.log(`[SOCKET] camera-stop ${roomId} by ${socket.id}`);
     if (!roomId) return;
-    io.to(roomId).emit("camera-stop", { roomId, socketId: socket.id });
+    const state = getRoomState(roomId);
+    io.to(roomId).emit("camera-stop", {
+      roomId,
+      socketId: socket.id,
+      isTeacher: state.teacherSocketId === socket.id
+    });
   });
 
   socket.on("close-class", ({ roomId }) => {
