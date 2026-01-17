@@ -308,6 +308,14 @@ io.on("connection", (socket) => {
       state.approved.set(socket.id, { socketId: socket.id, user });
       socket.emit("join-approved", { roomId });
       socket.emit("chat-history", { messages: state.messages });
+      if (state.teacherSocketId) {
+        io.to(state.teacherSocketId).emit("student-approved", {
+          roomId,
+          socketId: socket.id,
+          user,
+          autoApproved: true
+        });
+      }
       emitApprovedList(roomId);
       updateRoleMetrics();
       return;
@@ -354,7 +362,8 @@ io.on("connection", (socket) => {
     io.to(state.teacherSocketId).emit("student-approved", {
       roomId,
       socketId,
-      user: request.user
+      user: request.user,
+      autoApproved: false
     });
     emitApprovedList(roomId);
   });

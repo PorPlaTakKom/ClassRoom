@@ -242,9 +242,6 @@ export default function Classroom({ user }) {
           user: currentUser
         });
       } else {
-        if (needsMediaAccess || mediaPermission !== "granted") {
-          return;
-        }
         socket.emit("request-join", {
           roomId,
           user: currentUser
@@ -285,6 +282,9 @@ export default function Classroom({ user }) {
         if (prev.some((entry) => entry.socketId === payload.socketId)) return prev;
         return [...prev, { socketId: payload.socketId, user: payload.user }];
       });
+      if (currentUser.role === "Teacher" && payload?.autoApproved) {
+        playNotification();
+      }
       if (currentUser.role !== "Teacher") return;
       if (!payload?.socketId) return;
       if (peerConnectionsRef.current.has(payload.socketId)) return;
@@ -536,6 +536,11 @@ export default function Classroom({ user }) {
       localCameraRef.current.play?.().catch(() => {});
     }
   }, [cameraEnabled]);
+
+  const handleSpeaking = (payload) => {
+    if (!payload?.name) return;
+    setSpeakingMap((prev) => ({ ...prev, [payload.name]: payload.speaking }));
+  };
 
   useEffect(() => {
     if (!currentUser || !micEnabled) return;
@@ -1463,7 +1468,3 @@ export default function Classroom({ user }) {
     </main>
   );
 }
-    const handleSpeaking = (payload) => {
-      if (!payload?.name) return;
-      setSpeakingMap((prev) => ({ ...prev, [payload.name]: payload.speaking }));
-    };
