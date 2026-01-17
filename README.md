@@ -146,7 +146,7 @@ https://your-domain.com
 
 Notes:
 - Ports 80 and 443 must be open and routed to this machine.
-- LiveKit requires ports 7880 (HTTP), 7881 (WebSocket), and UDP 50000-51000.
+- LiveKit signaling is proxied by Caddy on 443; keep UDP 50000-51000 open for media.
 - Caddy stores certs in Docker volumes `caddy_data` and `caddy_config`.
 
 ## Notes
