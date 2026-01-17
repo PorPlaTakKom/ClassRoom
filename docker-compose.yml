@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  server:
+    build:
+      context: ./server
+    environment:
+      NODE_ENV: production
+    expose:
+      - "4000"
+
+  client:
+    build:
+      context: ./client
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - server
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

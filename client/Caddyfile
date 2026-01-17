@@ -1,0 +1,14 @@
+{
+  email {$ACME_EMAIL}
+}
+
+{$DOMAIN:localhost} {
+  encode gzip
+
+  root * /srv
+  try_files {path} /index.html
+  file_server
+
+  @api path /api/* /socket.io/*
+  reverse_proxy @api server:4000
+}

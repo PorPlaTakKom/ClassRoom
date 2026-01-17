@@ -1,0 +1,60 @@
+@import url("https://fonts.googleapis.com/css2?family=Mali:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  font-family: "Mali", "DM Sans", ui-sans-serif, system-ui;
+  color: #151518;
+}
+
+.gradient-shell {
+  background: radial-gradient(circle at top, rgba(255, 255, 255, 0.95), transparent 55%),
+    radial-gradient(circle at 15% 20%, rgba(211, 235, 255, 0.9), transparent 50%),
+    linear-gradient(160deg, #dff0ff 15%, #bfe3ff 55%, #a6d4ff 85%);
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(22px);
+  border: 1px solid rgba(21, 21, 24, 0.08);
+}
+
+.soft-shadow {
+  box-shadow: 0 20px 45px rgba(15, 32, 66, 0.12);
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes float-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.6s ease-out both;
+}
+
+.animate-float-in {
+  animation: float-in 0.5s ease-out both;
+}

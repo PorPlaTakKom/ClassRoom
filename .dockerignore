@@ -1,0 +1,10 @@
+.git
+.gitignore
+node_modules
+**/node_modules
+**/dist
+**/.vite
+**/certs
+**/.env
+**/.env.*
+.DS_Store
