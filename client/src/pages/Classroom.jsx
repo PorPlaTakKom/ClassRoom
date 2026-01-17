@@ -12,14 +12,7 @@ import {
   Users2,
   Video
 } from "lucide-react";
-import {
-  Room,
-  RoomEvent,
-  Track,
-  TrackEvent,
-  VideoPreset,
-  createLocalScreenTracks
-} from "livekit-client";
+import { Room, RoomEvent, Track, TrackEvent, createLocalScreenTracks } from "livekit-client";
 import {
   deleteRoomFile,
   fetchLivekitToken,
@@ -399,11 +392,7 @@ export default function Classroom() {
         }
         const lkRoom = new Room({
           adaptiveStream: true,
-          dynacast: true,
-          publishDefaults: {
-            videoSimulcastLayers: [VideoPreset.h360, VideoPreset.h720],
-            screenShareSimulcastLayers: [VideoPreset.h720, VideoPreset.h1080]
-          }
+          dynacast: true
         });
 
         const setTeacherTrack = (publication, track) => {
@@ -761,7 +750,15 @@ export default function Classroom() {
         videoTrack.attach(localVideoRef.current);
       }
     } catch (error) {
-      setShareError("ไม่สามารถแชร์หน้าจอได้ โปรดลองใหม่อีกครั้ง");
+      const name = error?.name || "UnknownError";
+      const message = error?.message || "Unknown reason";
+      if (name === "NotAllowedError") {
+        setShareError("ยกเลิกการแชร์หน้าจอ");
+      } else if (name === "NotFoundError") {
+        setShareError("ไม่พบแหล่งแชร์หน้าจอ");
+      } else {
+        setShareError(`ไม่สามารถแชร์หน้าจอได้: ${name} (${message})`);
+      }
     }
   };
 
