@@ -106,6 +106,8 @@ export default function Classroom({ user }) {
   const [micAvailable, setMicAvailable] = useState(true);
   const [micPermission, setMicPermission] = useState("unknown");
   const [mediaPermission, setMediaPermission] = useState("unknown");
+  const [needsMediaAccess, setNeedsMediaAccess] = useState(false);
+  const [speakingMap, setSpeakingMap] = useState({});
   const [isSpeaking, setIsSpeaking] = useState(false);
   const micStreamRef = useRef(null);
   const [audioStreams, setAudioStreams] = useState([]);
@@ -176,9 +178,11 @@ export default function Classroom({ user }) {
       .then((stream) => {
         stream.getTracks().forEach((track) => track.stop());
         setMediaPermission("granted");
+        setNeedsMediaAccess(false);
       })
       .catch(() => {
         setMediaPermission("denied");
+        setNeedsMediaAccess(true);
       });
   }, [room, currentUser, needsJoinProfile]);
 
@@ -188,8 +192,10 @@ export default function Classroom({ user }) {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
       stream.getTracks().forEach((track) => track.stop());
       setMediaPermission("granted");
+      setNeedsMediaAccess(false);
     } catch (error) {
       setMediaPermission("denied");
+      setNeedsMediaAccess(true);
     }
   };
 
@@ -236,6 +242,9 @@ export default function Classroom({ user }) {
           user: currentUser
         });
       } else {
+        if (needsMediaAccess || mediaPermission !== "granted") {
+          return;
+        }
         socket.emit("request-join", {
           roomId,
           user: currentUser
@@ -360,6 +369,7 @@ export default function Classroom({ user }) {
       }
       setAudioStreams([]);
       setRemoteVideoStreams([]);
+      setSpeakingMap({});
       if (micStreamRef.current) {
         micStreamRef.current.getTracks().forEach((track) => track.stop());
         micStreamRef.current = null;
@@ -387,6 +397,7 @@ export default function Classroom({ user }) {
     socket.on("webrtc-stop", handleWebRtcStop);
     socket.on("camera-stop", handleCameraStop);
     socket.on("class-closed", handleClassClosed);
+    socket.on("speaking", handleSpeaking);
 
     if (socket.connected) {
       handleConnect();
@@ -408,8 +419,9 @@ export default function Classroom({ user }) {
       socket.off("webrtc-stop", handleWebRtcStop);
       socket.off("camera-stop", handleCameraStop);
       socket.off("class-closed", handleClassClosed);
+      socket.off("speaking", handleSpeaking);
     };
-  }, [room, roomId, currentUser, needsJoinProfile]);
+  }, [room, roomId, currentUser, needsJoinProfile, needsMediaAccess, mediaPermission]);
 
   useEffect(() => {
     const supportsDisplayMedia = Boolean(
@@ -524,6 +536,16 @@ export default function Classroom({ user }) {
       localCameraRef.current.play?.().catch(() => {});
     }
   }, [cameraEnabled]);
+
+  useEffect(() => {
+    if (!currentUser || !micEnabled) return;
+    const socket = getSocket();
+    socket.emit("speaking", {
+      roomId,
+      user: currentUser,
+      speaking: isSpeaking
+    });
+  }, [isSpeaking, micEnabled, currentUser, roomId]);
 
   const createPeer = (targetId) => {
     if (peerConnectionsRef.current.has(targetId)) {
@@ -989,9 +1011,9 @@ export default function Classroom({ user }) {
 
   return (
     <main className="min-h-screen overflow-y-auto px-4 py-6 md:px-6">
-      {mediaPermission === "denied" && (
+      {currentUser?.role === "Student" && needsMediaAccess && (
         <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          กรุณากดเพื่ออนุญาตไมค์/กล้อง
+          กรุณากดเพื่ออนุญาตไมค์/กล้องก่อนเข้าห้อง
           <button
             type="button"
             onClick={requestMediaPermissions}
@@ -1307,7 +1329,11 @@ export default function Classroom({ user }) {
                     .map((entry) => (
                       <span
                         key={entry.socketId}
-                        className="rounded-full border border-ink-900/10 bg-white/70 px-2 py-0.5 text-[11px] text-ink-800"
+                        className={`rounded-full border px-2 py-0.5 text-[11px] ${
+                          speakingMap[entry.user?.name]
+                            ? "border-emerald-300 bg-emerald-100 text-emerald-800 animate-pulse"
+                            : "border-ink-900/10 bg-white/70 text-ink-800"
+                        }`}
                       >
                         {entry.user.name}
                       </span>
@@ -1357,12 +1383,16 @@ export default function Classroom({ user }) {
                 ) : (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {approvedList.map((entry) => (
-                      <span
-                        key={entry.socketId}
-                        className="rounded-full border border-ink-900/10 bg-white/70 px-3 py-1 text-xs text-ink-800"
-                      >
-                        {entry.user?.name}
-                      </span>
+                        <span
+                          key={entry.socketId}
+                          className={`rounded-full border px-3 py-1 text-xs ${
+                            speakingMap[entry.user?.name]
+                              ? "border-emerald-300 bg-emerald-100 text-emerald-800 animate-pulse"
+                              : "border-ink-900/10 bg-white/70 text-ink-800"
+                          }`}
+                        >
+                          {entry.user?.name}
+                        </span>
                     ))}
                   </div>
                 )}
@@ -1433,3 +1463,7 @@ export default function Classroom({ user }) {
     </main>
   );
 }
+    const handleSpeaking = (payload) => {
+      if (!payload?.name) return;
+      setSpeakingMap((prev) => ({ ...prev, [payload.name]: payload.speaking }));
+    };

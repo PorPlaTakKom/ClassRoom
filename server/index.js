@@ -374,6 +374,15 @@ io.on("connection", (socket) => {
     io.to(roomId).emit("chat-message", payload);
   });
 
+  socket.on("speaking", ({ roomId, user, speaking }) => {
+    if (!roomId || !user?.name) return;
+    if (!socket.rooms.has(roomId)) return;
+    io.to(roomId).emit("speaking", {
+      name: user.name,
+      speaking: Boolean(speaking)
+    });
+  });
+
   socket.on("teacher-ready", ({ roomId }) => {
     console.log(`[SOCKET] teacher-ready ${roomId}`);
     const state = getRoomState(roomId);
