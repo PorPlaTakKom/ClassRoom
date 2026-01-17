@@ -38,6 +38,11 @@ export async function fetchRoomFiles(roomId) {
   return data;
 }
 
+export async function loginTeacher(payload) {
+  const { data } = await api.post("/api/login", payload);
+  return data;
+}
+
 export async function uploadRoomFile(roomId, file) {
   const formData = new FormData();
   formData.append("file", file);

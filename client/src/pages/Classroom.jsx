@@ -4,7 +4,6 @@ import {
   Camera,
   CameraOff,
   CheckCircle2,
-  CircleDot,
   Maximize2,
   Mic,
   MicOff,
@@ -25,6 +24,26 @@ import { getStoredUser, storeUser } from "../lib/storage.js";
 
 const RTC_CONFIG = {
   iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }]
+};
+
+const applySenderParams = (sender, kind) => {
+  if (!sender?.getParameters) return;
+  try {
+    const params = sender.getParameters();
+    if (!params.encodings) params.encodings = [{}];
+    if (kind === "screen") {
+      params.encodings[0].maxBitrate = 1_500_000;
+      params.degradationPreference = "maintain-resolution";
+    } else if (kind === "camera") {
+      params.encodings[0].maxBitrate = 800_000;
+      params.degradationPreference = "maintain-framerate";
+    } else if (kind === "audio") {
+      params.encodings[0].maxBitrate = 32_000;
+    }
+    sender.setParameters(params).catch(() => {});
+  } catch (error) {
+    // Ignore browsers that block setParameters.
+  }
 };
 
 const formatFileSize = (bytes) => {
@@ -284,11 +303,24 @@ export default function Classroom({ user }) {
     };
 
     const handleWebRtcStop = () => {
-      if (currentUser.role === "Student") {
+      if (currentUser?.role === "Student") {
         if (remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = null;
         }
         setHasRemoteStream(false);
+      }
+    };
+
+    const handleCameraStop = (payload) => {
+      if (currentUser?.role === "Student") {
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = null;
+        }
+        setHasRemoteStream(false);
+      } else if (currentUser?.role === "Teacher" && payload?.socketId) {
+        setRemoteVideoStreams((prev) =>
+          prev.filter((item) => item.socketId !== payload.socketId)
+        );
       }
     };
 
@@ -325,6 +357,7 @@ export default function Classroom({ user }) {
     socket.on("webrtc-answer", handleWebRtcAnswer);
     socket.on("webrtc-ice", handleWebRtcIce);
     socket.on("webrtc-stop", handleWebRtcStop);
+    socket.on("camera-stop", handleCameraStop);
     socket.on("class-closed", handleClassClosed);
 
     if (socket.connected) {
@@ -345,6 +378,7 @@ export default function Classroom({ user }) {
       socket.off("webrtc-answer", handleWebRtcAnswer);
       socket.off("webrtc-ice", handleWebRtcIce);
       socket.off("webrtc-stop", handleWebRtcStop);
+      socket.off("camera-stop", handleCameraStop);
       socket.off("class-closed", handleClassClosed);
     };
   }, [room, roomId, currentUser, needsJoinProfile]);
@@ -477,11 +511,20 @@ export default function Classroom({ user }) {
         if (currentUser?.role === "Student" && remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = stream;
           setHasRemoteStream(true);
+          event.track.onended = () => {
+            if (remoteVideoRef.current?.srcObject === stream) {
+              remoteVideoRef.current.srcObject = null;
+            }
+            setHasRemoteStream(false);
+          };
         } else if (currentUser?.role === "Teacher") {
+          event.track.onended = () => {
+            setRemoteVideoStreams((prev) => prev.filter((item) => item.stream !== stream));
+          };
           setRemoteVideoStreams((prev) => {
             const key = `${targetId}-${stream.id}`;
             if (prev.some((item) => item.id === key)) return prev;
-            return [...prev, { id: key, stream }];
+            return [...prev, { id: key, stream, socketId: targetId }];
           });
         }
         return;
@@ -524,7 +567,9 @@ export default function Classroom({ user }) {
   const attachScreenTracks = (peer) => {
     if (!screenStreamRef.current) return;
     screenStreamRef.current.getTracks().forEach((track) => {
-      peer.addTrack(track, screenStreamRef.current);
+      track.contentHint = "detail";
+      const sender = peer.addTrack(track, screenStreamRef.current);
+      applySenderParams(sender, "screen");
     });
   };
 
@@ -532,19 +577,24 @@ export default function Classroom({ user }) {
     if (!micStreamRef.current) return;
     const track = micStreamRef.current.getAudioTracks()[0];
     if (!track) return;
+    track.contentHint = "speech";
     const sender = micSendersRef.current.get(peer);
     if (sender) {
       sender.replaceTrack(track);
+      applySenderParams(sender, "audio");
     } else {
       const nextSender = peer.addTrack(track, micStreamRef.current);
       micSendersRef.current.set(peer, nextSender);
+      applySenderParams(nextSender, "audio");
     }
   };
 
   const attachCameraTracks = (peer) => {
     if (!cameraStreamRef.current) return;
     cameraStreamRef.current.getTracks().forEach((track) => {
-      peer.addTrack(track, cameraStreamRef.current);
+      track.contentHint = "motion";
+      const sender = peer.addTrack(track, cameraStreamRef.current);
+      applySenderParams(sender, "camera");
     });
   };
 
@@ -692,9 +742,9 @@ export default function Classroom({ user }) {
       }
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          frameRate: { ideal: 30, max: 30 }
+          width: { ideal: 1280, max: 1280 },
+          height: { ideal: 720, max: 720 },
+          frameRate: { ideal: 24, max: 30 }
         },
         audio: false
       });
@@ -718,7 +768,18 @@ export default function Classroom({ user }) {
       cameraStreamRef.current.getTracks().forEach((track) => track.stop());
       cameraStreamRef.current = null;
     }
+    peerConnectionsRef.current.forEach((peer) => {
+      const sender = peer
+        .getSenders()
+        .find((item) => item.track && item.track.kind === "video");
+      if (sender) {
+        sender.replaceTrack(null).catch(() => {});
+      }
+    });
+    const socket = getSocket();
+    socket.emit("camera-stop", { roomId });
     if (localCameraRef.current) {
+      localCameraRef.current.pause?.();
       localCameraRef.current.srcObject = null;
     }
     setCameraEnabled(false);
@@ -732,7 +793,9 @@ export default function Classroom({ user }) {
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true
+          autoGainControl: true,
+          channelCount: 1,
+          sampleRate: 24000
         }
       });
       micStreamRef.current = stream;
@@ -823,6 +886,25 @@ export default function Classroom({ user }) {
     }
   };
 
+  const handleRefreshLive = () => {
+    const socket = getSocket();
+    peerConnectionsRef.current.forEach((peer) => peer.close());
+    peerConnectionsRef.current.clear();
+    micSendersRef.current.clear();
+    setRemoteVideoStreams([]);
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = null;
+    }
+    setHasRemoteStream(false);
+    if (currentUser?.role === "Student") {
+      setApproved(false);
+    }
+
+    if (!currentUser) return;
+    socket.disconnect();
+    socket.connect();
+  };
+
   if (loading) {
     return (
       <main className="min-h-screen px-6 py-10">
@@ -856,7 +938,7 @@ export default function Classroom({ user }) {
           กรุณาเข้าสู่ระบบก่อนเข้าห้องเรียน
           <button
             className="ml-4 rounded-full border border-ink-900/20 bg-white/70 px-4 py-1 text-xs text-ink-700"
-            onClick={() => navigate("/")}
+            onClick={() => navigate("/login")}
           >
             ไปหน้า Login
           </button>
@@ -889,10 +971,10 @@ export default function Classroom({ user }) {
             <div className="mt-6 flex items-center justify-between gap-3">
               <button
                 type="button"
-                onClick={() => navigate("/")}
-                className="rounded-full border border-ink-900/20 bg-white/70 px-4 py-2 text-xs font-semibold text-ink-700"
-              >
-                กลับไปหน้า Login
+                onClick={() => navigate("/login")}
+              className="rounded-full border border-ink-900/20 bg-white/70 px-4 py-2 text-xs font-semibold text-ink-700"
+            >
+              กลับไปหน้า Login
               </button>
               <button
                 type="submit"
@@ -946,10 +1028,6 @@ export default function Classroom({ user }) {
               </button>
             )}
             {copyStatus && <span className="text-xs text-ink-600">{copyStatus}</span>}
-            <span className="flex items-center gap-2 rounded-full border border-ink-900/15 px-3 py-1">
-              <CircleDot className={`h-3 w-3 ${connected ? "text-sky-300" : "text-ink-400"}`} />
-              {connected ? "Live" : "Offline"}
-            </span>
             <span className="rounded-full border border-ink-900/15 px-3 py-1">{roleBadge}</span>
             {currentUser?.role === "Teacher" && (
               <button
@@ -1087,6 +1165,12 @@ export default function Classroom({ user }) {
                 >
                   {micEnabled ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
                 </button>
+                <button
+                  onClick={handleRefreshLive}
+                  className="inline-flex h-10 items-center justify-center rounded-full border border-ink-900/20 bg-white/70 px-4 text-[11px] font-semibold text-ink-700 shadow-sm transition hover:-translate-y-0.5 hover:border-ink-900/40"
+                >
+                  รีเฟรชจอ
+                </button>
                 {micError && <span className="text-sm text-rose-600">{micError}</span>}
               </div>
             )}
@@ -1157,6 +1241,28 @@ export default function Classroom({ user }) {
             {audioStreams.map((item) => (
               <AudioPlayer key={item.id} stream={item.stream} />
             ))}
+            {currentUser?.role === "Student" && (
+              <div className="rounded-2xl border border-ink-900/10 bg-white/70 p-3 text-sm text-ink-700">
+                ครูผู้สอน: <span className="font-semibold text-ink-900">{room.teacherName}</span>
+              </div>
+            )}
+            {currentUser?.role === "Student" && approvedList.length > 0 && (
+              <div className="mt-3 rounded-2xl border border-ink-900/10 bg-white/70 p-3">
+                <p className="text-xs font-semibold text-ink-600">เพื่อนในห้อง</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {approvedList
+                    .filter((entry) => entry.user?.name && entry.user.name !== currentUser?.name)
+                    .map((entry) => (
+                      <span
+                        key={entry.socketId}
+                        className="rounded-full border border-ink-900/10 bg-white/70 px-2 py-0.5 text-[11px] text-ink-800"
+                      >
+                        {entry.user.name}
+                      </span>
+                    ))}
+                </div>
+              </div>
+            )}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <MessageCircle className="h-5 w-5 text-sky-600" />

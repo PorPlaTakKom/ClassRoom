@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { CalendarClock, PlusCircle, Video } from "lucide-react";
+import { CalendarClock, LogOut, PlusCircle, Video } from "lucide-react";
 import { clearStoredUser } from "../lib/storage.js";
 import { createRoom, fetchRooms } from "../lib/api.js";
 import { getSocket } from "../lib/socket.js";
@@ -9,12 +9,17 @@ export default function Dashboard({ user }) {
   const [rooms, setRooms] = useState([]);
   const [title, setTitle] = useState("");
   const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
 
   const reload = useCallback(async () => {
     setLoading(true);
+    setErrorMessage("");
     try {
       const data = await fetchRooms();
       setRooms(Array.isArray(data.rooms) ? data.rooms : []);
+    } catch (error) {
+      setRooms([]);
+      setErrorMessage("โหลดรายการห้องเรียนไม่สำเร็จ");
     } finally {
       setLoading(false);
     }
@@ -46,13 +51,23 @@ export default function Dashboard({ user }) {
   const handleCreate = async (event) => {
     event.preventDefault();
     if (!title.trim()) return;
-    await createRoom({ title: title.trim(), teacherName: user.name });
-    setTitle("");
-    reload();
+    setErrorMessage("");
+    try {
+      await createRoom({ title: title.trim(), teacherName: user.name });
+      setTitle("");
+      reload();
+    } catch (error) {
+      setErrorMessage("สร้างห้องเรียนไม่สำเร็จ");
+    }
+  };
+
+  const handleLogout = () => {
+    clearStoredUser();
+    window.location.href = "/login";
   };
 
   return (
-    <main className="min-h-screen px-6 py-10">
+    <main className="min-h-screen px-6 py-10 text-ink-900">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 animate-fade-up">
         <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
@@ -67,12 +82,10 @@ export default function Dashboard({ user }) {
             </p>
           </div>
           <button
-            className="rounded-full border border-ink-900/20 bg-white/70 px-4 py-2 text-xs uppercase tracking-[0.2em] text-ink-700 transition hover:border-ink-900/40"
-            onClick={() => {
-              clearStoredUser();
-              window.location.href = "/";
-            }}
+            className="inline-flex items-center gap-2 rounded-full border border-ink-900/20 bg-white/70 px-4 py-2 text-xs uppercase tracking-[0.2em] text-ink-700 transition hover:border-ink-900/40"
+            onClick={handleLogout}
           >
+            <LogOut className="h-3.5 w-3.5" />
             ออกจากระบบ
           </button>
         </header>
@@ -106,7 +119,7 @@ export default function Dashboard({ user }) {
         <section className="grid gap-6 lg:grid-cols-3">
           <div className="lg:col-span-2">
             <div className="flex items-center gap-3">
-              <Video className="h-5 w-5 text-sky-300" />
+              <Video className="h-5 w-5 text-sky-600" />
               <h2 className="font-display text-2xl text-ink-900">
                 {user.role === "Teacher" ? "ห้องเรียนของฉัน" : "ห้องเรียนทั้งหมด"}
               </h2>
@@ -116,6 +129,10 @@ export default function Dashboard({ user }) {
               {loading ? (
                 <div className="rounded-2xl border border-ink-900/10 bg-white/70 p-6 text-ink-600">
                   กำลังโหลดข้อมูลห้องเรียน...
+                </div>
+              ) : errorMessage ? (
+                <div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 text-rose-700">
+                  {errorMessage}
                 </div>
               ) : myRooms.length === 0 ? (
                 <div className="rounded-2xl border border-ink-900/10 bg-white/70 p-6 text-ink-600">
@@ -150,16 +167,6 @@ export default function Dashboard({ user }) {
               )}
             </div>
           </div>
-
-          <aside className="glass-panel rounded-3xl p-6 soft-shadow">
-            <h3 className="font-display text-xl text-ink-900">สถานะระบบ Live</h3>
-            <p className="mt-2 text-sm text-ink-600">
-              ระบบ Live เชื่อมต่อผ่าน Socket.io และพร้อมใช้งานแบบเรียลไทม์
-            </p>
-            <div className="mt-6 rounded-2xl border border-ink-900/10 bg-white/70 p-4 text-sm text-ink-600">
-              เปิด Classroom เพื่อเริ่มรับคำขอเข้าห้อง และเริ่มต้นการแชทได้ทันที
-            </div>
-          </aside>
         </section>
       </div>
     </main>

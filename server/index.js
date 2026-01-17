@@ -42,40 +42,55 @@ const httpRequestsTotal = new promClient.Counter({
 const socketConnections = new promClient.Gauge({
   name: "socket_connections_active",
   help: "Active socket connections",
-  registers: [register]
+  registers: [register],
+  collect() {
+    this.set(io.engine.clientsCount);
+  }
 });
 
 const studentsActive = new promClient.Gauge({
   name: "students_active",
   help: "Active approved students",
-  registers: [register]
+  registers: [register],
+  collect() {
+    let studentCount = 0;
+    roomState.forEach((state) => {
+      studentCount += state.approved.size;
+    });
+    this.set(studentCount);
+  }
 });
 
 const teachersActive = new promClient.Gauge({
   name: "teachers_active",
   help: "Active teachers",
-  registers: [register]
+  registers: [register],
+  collect() {
+    let teacherCount = 0;
+    roomState.forEach((state) => {
+      if (state.teacherSocketId) teacherCount += 1;
+    });
+    this.set(teacherCount);
+  }
 });
 
 const roomsActive = new promClient.Gauge({
   name: "rooms_active",
   help: "Active rooms",
-  registers: [register]
+  registers: [register],
+  collect() {
+    this.set(rooms.size);
+  }
 });
 
 const updateRoomsMetric = () => {
-  roomsActive.set(rooms.size);
+  roomsActive.collect();
 };
 
 const updateRoleMetrics = () => {
-  let teacherCount = 0;
-  let studentCount = 0;
-  roomState.forEach((state) => {
-    if (state.teacherSocketId) teacherCount += 1;
-    studentCount += state.approved.size;
-  });
-  teachersActive.set(teacherCount);
-  studentsActive.set(studentCount);
+  teachersActive.collect();
+  studentsActive.collect();
+  socketConnections.collect();
 };
 
 app.use((req, res, next) => {
@@ -126,10 +141,30 @@ const getRoomFiles = (roomId) => {
   return filesByRoom.get(roomId);
 };
 
+const emitApprovedList = (roomId) => {
+  const state = roomState.get(roomId);
+  if (!state) return;
+  io.to(roomId).emit("approved-list", {
+    approved: Array.from(state.approved.values())
+  });
+};
+
 app.get("/api/rooms", (req, res) => {
   res.json({
     rooms: Array.from(rooms.values())
   });
+});
+
+app.post("/api/login", (req, res) => {
+  const { username, password } = req.body || {};
+  const safeUser = String(username || "").trim().toLowerCase();
+  const safePass = String(password || "").trim();
+  if (safeUser === "yokyay" && safePass === "461225") {
+    return res.json({
+      user: { name: "yokyay", role: "Teacher" }
+    });
+  }
+  return res.status(401).json({ message: "Invalid credentials" });
 });
 
 app.post("/api/rooms", (req, res) => {
@@ -243,7 +278,7 @@ app.delete("/api/rooms/:roomId/files/:fileId", (req, res) => {
 
 io.on("connection", (socket) => {
   console.log(`[SOCKET] connected ${socket.id}`);
-  socketConnections.inc();
+  updateRoleMetrics();
   socket.on("join-room", ({ roomId, user }) => {
     console.log(`[SOCKET] join-room ${roomId} by ${user?.name} (${user?.role})`);
     const room = rooms.get(roomId);
@@ -257,9 +292,7 @@ io.on("connection", (socket) => {
     socket.emit("pending-list", {
       pending: Array.from(state.pending.values())
     });
-    socket.emit("approved-list", {
-      approved: Array.from(state.approved.values())
-    });
+    emitApprovedList(roomId);
     updateRoleMetrics();
   });
 
@@ -275,11 +308,7 @@ io.on("connection", (socket) => {
       state.approved.set(socket.id, { socketId: socket.id, user });
       socket.emit("join-approved", { roomId });
       socket.emit("chat-history", { messages: state.messages });
-      if (state.teacherSocketId) {
-        io.to(state.teacherSocketId).emit("approved-list", {
-          approved: Array.from(state.approved.values())
-        });
-      }
+      emitApprovedList(roomId);
       updateRoleMetrics();
       return;
     }
@@ -327,6 +356,7 @@ io.on("connection", (socket) => {
       socketId,
       user: request.user
     });
+    emitApprovedList(roomId);
   });
 
   socket.on("chat-message", ({ roomId, message, user }) => {
@@ -387,6 +417,12 @@ io.on("connection", (socket) => {
     io.to(roomId).emit("webrtc-stop", { roomId });
   });
 
+  socket.on("camera-stop", ({ roomId }) => {
+    console.log(`[SOCKET] camera-stop ${roomId} by ${socket.id}`);
+    if (!roomId) return;
+    io.to(roomId).emit("camera-stop", { roomId, socketId: socket.id });
+  });
+
   socket.on("close-class", ({ roomId }) => {
     console.log(`[SOCKET] close-class ${roomId}`);
     if (!roomId) return;
@@ -403,7 +439,6 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     console.log(`[SOCKET] disconnected ${socket.id}`);
-    socketConnections.dec();
     roomState.forEach((state) => {
       if (state.teacherSocketId === socket.id) {
         state.teacherSocketId = null;
@@ -416,6 +451,9 @@ io.on("connection", (socket) => {
       }
     });
     updateRoleMetrics();
+    roomState.forEach((state, roomId) => {
+      if (state) emitApprovedList(roomId);
+    });
   });
 });
 
