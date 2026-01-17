@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useDispatch, useSelector } from "react-redux";
 import { Link } from "react-router-dom";
 import { CalendarClock, LogOut, PlusCircle, Video } from "lucide-react";
-import { clearStoredUser } from "../lib/storage.js";
+import { clearUser } from "../store/authSlice.js";
 import { createRoom, fetchRooms } from "../lib/api.js";
 import { getSocket } from "../lib/socket.js";
 
-export default function Dashboard({ user }) {
+export default function Dashboard() {
+  const user = useSelector((state) => state.auth.user);
+  const dispatch = useDispatch();
   const [rooms, setRooms] = useState([]);
   const [title, setTitle] = useState("");
   const [loading, setLoading] = useState(true);
@@ -62,7 +65,7 @@ export default function Dashboard({ user }) {
   };
 
   const handleLogout = () => {
-    clearStoredUser();
+    dispatch(clearUser());
     window.location.href = "/login";
   };
 

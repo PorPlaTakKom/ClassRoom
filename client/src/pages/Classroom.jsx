@@ -22,7 +22,8 @@ import {
   uploadRoomFile
 } from "../lib/api.js";
 import { getSocket } from "../lib/socket.js";
-import { getStoredUser, storeUser } from "../lib/storage.js";
+import { useDispatch, useSelector } from "react-redux";
+import { setUser } from "../store/authSlice.js";
 
 const RemoteVideo = memo(function RemoteVideo({ track, className, videoRef: externalRef }) {
   const internalRef = useRef(null);
@@ -34,6 +35,7 @@ const RemoteVideo = memo(function RemoteVideo({ track, className, videoRef: exte
       track.attach(videoRef.current);
       return () => track.detach(videoRef.current);
     }
+    videoRef.current.srcObject = null;
     return undefined;
   }, [track]);
 
@@ -62,17 +64,19 @@ function AudioPlayer({ track }) {
   return <audio ref={audioRef} autoPlay />;
 }
 
-export default function Classroom({ user }) {
+export default function Classroom() {
   const { roomId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
   const joinMode = new URLSearchParams(location.search).get("join") === "1";
+  const dispatch = useDispatch();
+  const storedUser = useSelector((state) => state.auth.user);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const liveKitRoomRef = useRef(null);
   const [room, setRoom] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [currentUser, setCurrentUser] = useState(user ?? getStoredUser());
+  const [currentUser, setCurrentUser] = useState(storedUser);
   const [approved, setApproved] = useState(currentUser?.role === "Teacher");
   const [pending, setPending] = useState([]);
   const [approvedList, setApprovedList] = useState([]);
@@ -94,7 +98,6 @@ export default function Classroom({ user }) {
   const [saveData, setSaveData] = useState(false);
   const [micEnabled, setMicEnabled] = useState(false);
   const [micError, setMicError] = useState("");
-  const [mediaPermission, setMediaPermission] = useState("unknown");
   const [needsMediaAccess, setNeedsMediaAccess] = useState(false);
   const [speakingMap, setSpeakingMap] = useState({});
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -141,7 +144,6 @@ export default function Classroom({ user }) {
       return;
     }
     if (!navigator.permissions?.query) {
-      setMediaPermission("unknown");
       setNeedsMediaAccess(true);
       return;
     }
@@ -152,10 +154,8 @@ export default function Classroom({ user }) {
           navigator.permissions.query({ name: "camera" })
         ]);
         const granted = mic.state === "granted" && cam.state === "granted";
-        setMediaPermission(granted ? "granted" : "prompt");
         setNeedsMediaAccess(!granted);
       } catch (error) {
-        setMediaPermission("unknown");
         setNeedsMediaAccess(true);
       }
     };
@@ -167,10 +167,8 @@ export default function Classroom({ user }) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
       stream.getTracks().forEach((track) => track.stop());
-      setMediaPermission("granted");
       setNeedsMediaAccess(false);
     } catch (error) {
-      setMediaPermission("denied");
       setNeedsMediaAccess(true);
     }
   };
@@ -193,8 +191,8 @@ export default function Classroom({ user }) {
   }, [roomId]);
 
   useEffect(() => {
-    setCurrentUser(user ?? getStoredUser());
-  }, [user]);
+    setCurrentUser(storedUser);
+  }, [storedUser]);
 
   useEffect(() => {
     setApproved(currentUser?.role === "Teacher");
@@ -646,7 +644,7 @@ export default function Classroom({ user }) {
     event.preventDefault();
     if (!joinName.trim()) return;
     const nextUser = { name: joinName.trim(), role: "Student" };
-    storeUser(nextUser);
+    dispatch(setUser(nextUser));
     setCurrentUser(nextUser);
     setApproved(false);
     setNeedsJoinProfile(false);

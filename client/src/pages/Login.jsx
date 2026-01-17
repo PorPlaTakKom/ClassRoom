@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useDispatch } from "react-redux";
 import { ArrowRight, Video } from "lucide-react";
 import { loginTeacher } from "../lib/api.js";
-import { storeUser } from "../lib/storage.js";
+import { setUser } from "../store/authSlice.js";
 
-export default function Login({ onLogin }) {
+export default function Login() {
   const navigate = useNavigate();
+  const dispatch = useDispatch();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -18,8 +20,7 @@ export default function Login({ onLogin }) {
     setLoading(true);
     loginTeacher({ username: username.trim(), password: password.trim() })
       .then(({ user }) => {
-        storeUser(user);
-        if (onLogin) onLogin(user);
+        dispatch(setUser(user));
         navigate("/dashboard");
       })
       .catch(() => {
