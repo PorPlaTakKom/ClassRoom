@@ -465,6 +465,31 @@ export default function Classroom({ user }) {
           }
         });
 
+        lkRoom.on(RoomEvent.TrackMuted, (publication, participant) => {
+          const role = participant?.metadata || "";
+          if (publication.source !== Track.Source.Camera) return;
+          if (currentUser.role === "Teacher" && role === "Student") {
+            setRemoteVideoStreams((prev) =>
+              prev.filter((item) => !item.id.startsWith(`${participant.sid}-`))
+            );
+          }
+        });
+
+        lkRoom.on(RoomEvent.TrackUnmuted, (publication, participant) => {
+          const role = participant?.metadata || "";
+          if (publication.source !== Track.Source.Camera) return;
+          if (currentUser.role === "Teacher" && role === "Student" && publication.track) {
+            setRemoteVideoStreams((prev) => {
+              const key = `${participant.sid}-${publication.track.sid}`;
+              if (prev.some((item) => item.id === key)) return prev;
+              return [
+                ...prev,
+                { id: key, track: publication.track, name: getParticipantName(participant) }
+              ];
+            });
+          }
+        });
+
         lkRoom.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
           const next = {};
           speakers.forEach((participant) => {
