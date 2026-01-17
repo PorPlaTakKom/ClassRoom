@@ -43,6 +43,11 @@ export async function loginTeacher(payload) {
   return data;
 }
 
+export async function fetchLivekitToken(roomId, user) {
+  const { data } = await api.post("/api/livekit/token", { roomId, user });
+  return data;
+}
+
 export async function uploadRoomFile(roomId, file) {
   const formData = new FormData();
   formData.append("file", file);

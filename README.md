@@ -129,6 +129,9 @@ Create a `.env` at repo root:
 ```
 DOMAIN=your-domain.com
 ACME_EMAIL=you@example.com
+LIVEKIT_API_KEY=change_me_key
+LIVEKIT_API_SECRET=change_me_secret
+LIVEKIT_URL=wss://your-domain.com:7881
 ```
 
 ### 2) Start services
@@ -143,6 +146,7 @@ https://your-domain.com
 
 Notes:
 - Ports 80 and 443 must be open and routed to this machine.
+- LiveKit requires ports 7880 (HTTP), 7881 (WebSocket), and UDP 50000-51000.
 - Caddy stores certs in Docker volumes `caddy_data` and `caddy_config`.
 
 ## Notes

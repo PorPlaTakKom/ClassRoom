@@ -7,6 +7,7 @@ import multer from "multer";
 import { Server } from "socket.io";
 import { nanoid } from "nanoid";
 import promClient from "prom-client";
+import { AccessToken } from "livekit-server-sdk";
 
 const app = express();
 const sslKeyPath = process.env.SSL_KEY;
@@ -165,6 +166,43 @@ app.post("/api/login", (req, res) => {
     });
   }
   return res.status(401).json({ message: "Invalid credentials" });
+});
+
+app.post("/api/livekit/token", (req, res) => {
+  const { roomId, user } = req.body || {};
+  if (!roomId || !user?.name || !user?.role) {
+    return res.status(400).json({ message: "Missing room or user" });
+  }
+  const room = rooms.get(roomId);
+  if (!room) {
+    return res.status(404).json({ message: "Room not found" });
+  }
+  const state = getRoomState(roomId);
+  if (user.role === "Student") {
+    const userKey = normalizeUserKey(user);
+    if (!userKey || !state.approvedUsers.has(userKey)) {
+      return res.status(403).json({ message: "User not approved" });
+    }
+  }
+  const apiKey = process.env.LIVEKIT_API_KEY;
+  const apiSecret = process.env.LIVEKIT_API_SECRET;
+  const livekitUrl = process.env.LIVEKIT_URL;
+  if (!apiKey || !apiSecret || !livekitUrl) {
+    return res.status(500).json({ message: "LiveKit not configured" });
+  }
+  const identity = `${user.role}-${user.name}-${nanoid(6)}`;
+  const token = new AccessToken(apiKey, apiSecret, {
+    identity,
+    name: user.name,
+    metadata: user.role
+  });
+  token.addGrant({
+    roomJoin: true,
+    room: roomId,
+    canPublish: true,
+    canSubscribe: true
+  });
+  res.json({ token: token.toJwt(), url: livekitUrl });
 });
 
 app.post("/api/rooms", (req, res) => {

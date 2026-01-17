@@ -12,8 +12,10 @@ import {
   Users2,
   Video
 } from "lucide-react";
+import { Room, RoomEvent, Track } from "livekit-client";
 import {
   deleteRoomFile,
+  fetchLivekitToken,
   fetchRoom,
   fetchRoomFiles,
   getApiBase,
@@ -22,48 +24,21 @@ import {
 import { getSocket } from "../lib/socket.js";
 import { getStoredUser, storeUser } from "../lib/storage.js";
 
-const RTC_CONFIG = {
-  iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }]
-};
-
-const RemoteVideo = memo(function RemoteVideo({ stream, className }) {
-  const videoRef = useRef(null);
+const RemoteVideo = memo(function RemoteVideo({ track, className, videoRef: externalRef }) {
+  const internalRef = useRef(null);
+  const videoRef = externalRef || internalRef;
 
   useEffect(() => {
     if (!videoRef.current) return;
-    videoRef.current.srcObject = stream;
-  }, [stream]);
-
-  return (
-    <video
-      ref={videoRef}
-      className={className}
-      autoPlay
-      muted
-      playsInline
-    />
-  );
-});
-
-const applySenderParams = (sender, kind) => {
-  if (!sender?.getParameters) return;
-  try {
-    const params = sender.getParameters();
-    if (!params.encodings) params.encodings = [{}];
-    if (kind === "screen") {
-      params.encodings[0].maxBitrate = 1_500_000;
-      params.degradationPreference = "maintain-resolution";
-    } else if (kind === "camera") {
-      params.encodings[0].maxBitrate = 800_000;
-      params.degradationPreference = "maintain-framerate";
-    } else if (kind === "audio") {
-      params.encodings[0].maxBitrate = 32_000;
+    if (track) {
+      track.attach(videoRef.current);
+      return () => track.detach(videoRef.current);
     }
-    sender.setParameters(params).catch(() => {});
-  } catch (error) {
-    // Ignore browsers that block setParameters.
-  }
-};
+    return undefined;
+  }, [track]);
+
+  return <video ref={videoRef} className={className} autoPlay muted playsInline />;
+});
 
 const formatFileSize = (bytes) => {
   if (bytes >= 1024 * 1024) {
@@ -75,15 +50,19 @@ const formatFileSize = (bytes) => {
   return `${bytes} B`;
 };
 
-function AudioPlayer({ stream }) {
+function AudioPlayer({ track }) {
   const audioRef = useRef(null);
 
   useEffect(() => {
     if (audioRef.current) {
-      audioRef.current.srcObject = stream;
-      audioRef.current.play?.().catch(() => {});
+      if (track) {
+        track.attach(audioRef.current);
+        audioRef.current.play?.().catch(() => {});
+        return () => track.detach(audioRef.current);
+      }
     }
-  }, [stream]);
+    return undefined;
+  }, [track]);
 
   return <audio ref={audioRef} autoPlay />;
 }
@@ -95,13 +74,7 @@ export default function Classroom({ user }) {
   const joinMode = new URLSearchParams(location.search).get("join") === "1";
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
-  const peerConnectionsRef = useRef(new Map());
-  const peerRolesRef = useRef(new Map());
-  const politeRef = useRef(new Map());
-  const makingOfferRef = useRef(new Map());
-  const ignoreOfferRef = useRef(new Map());
-  const localSocketIdRef = useRef(null);
-  const screenStreamRef = useRef(null);
+  const liveKitRoomRef = useRef(null);
   const [room, setRoom] = useState(null);
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState(user ?? getStoredUser());
@@ -134,43 +107,18 @@ export default function Classroom({ user }) {
   const [needsMediaAccess, setNeedsMediaAccess] = useState(false);
   const [speakingMap, setSpeakingMap] = useState({});
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const micStreamRef = useRef(null);
-  const [audioStreams, setAudioStreams] = useState([]);
-  const micAnalyserRef = useRef(null);
-  const micRafRef = useRef(null);
-  const micSendersRef = useRef(new Map());
+  const [audioTracks, setAudioTracks] = useState([]);
+  const [teacherVideoTrack, setTeacherVideoTrack] = useState(null);
+  const [teacherCameraTrack, setTeacherCameraTrack] = useState(null);
+  const [teacherScreenTrack, setTeacherScreenTrack] = useState(null);
   const chatEndRef = useRef(null);
   const [cameraEnabled, setCameraEnabled] = useState(false);
   const [cameraError, setCameraError] = useState("");
-  const cameraStreamRef = useRef(null);
   const localCameraRef = useRef(null);
   const [remoteVideoStreams, setRemoteVideoStreams] = useState([]);
   const [needsJoinProfile, setNeedsJoinProfile] = useState(false);
   const [joinName, setJoinName] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
-
-  const playNotification = () => {
-    try {
-      if (!audioCtxRef.current) {
-        audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-      }
-      const ctx = audioCtxRef.current;
-      if (ctx.state === "suspended") {
-        ctx.resume().catch(() => {});
-      }
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.value = 880;
-      gain.gain.value = 0.08;
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.18);
-    } catch (error) {
-      // Ignore autoplay restrictions.
-    }
-  };
 
   useEffect(() => {
     let active = true;
@@ -290,16 +238,6 @@ export default function Classroom({ user }) {
 
     const handleApprovedList = (payload) => {
       setApprovedList(payload.approved || []);
-      if (currentUser.role !== "Teacher") return;
-      payload.approved?.forEach((entry) => {
-        if (!entry?.socketId) return;
-        if (peerConnectionsRef.current.has(entry.socketId)) return;
-        const peer = createPeer(entry.socketId, "Student");
-        attachScreenTracks(peer);
-        attachMicTracks(peer);
-        attachCameraTracks(peer);
-        forceOffer(peer, entry.socketId);
-      });
     };
 
     const handleStudentApproved = (payload) => {
@@ -308,17 +246,6 @@ export default function Classroom({ user }) {
         if (prev.some((entry) => entry.socketId === payload.socketId)) return prev;
         return [...prev, { socketId: payload.socketId, user: payload.user }];
       });
-      if (currentUser.role === "Teacher" && payload?.autoApproved) {
-        playNotification();
-      }
-      if (currentUser.role !== "Teacher") return;
-      if (!payload?.socketId) return;
-      if (peerConnectionsRef.current.has(payload.socketId)) return;
-      const peer = createPeer(payload.socketId, "Student");
-      attachScreenTracks(peer);
-      attachMicTracks(peer);
-      attachCameraTracks(peer);
-      forceOffer(peer, payload.socketId);
     };
 
     const handleChatHistory = (payload) => {
@@ -333,96 +260,22 @@ export default function Classroom({ user }) {
       setApproved(true);
     };
 
-    // keep streaming in sync with approved students
-
-    const handleWebRtcOffer = async (payload) => {
-      const socket = getSocket();
-      const peer = createPeer(payload.from, payload.fromRole);
-      const polite = politeRef.current.get(payload.from) ?? true;
-      const makingOffer = makingOfferRef.current.get(payload.from);
-      const offerCollision = payload.offer && (makingOffer || peer.signalingState !== "stable");
-      const ignoreOffer = !polite && offerCollision;
-      ignoreOfferRef.current.set(payload.from, ignoreOffer);
-      if (ignoreOffer) return;
-      try {
-        if (offerCollision) {
-          await peer.setLocalDescription({ type: "rollback" });
-        }
-        await peer.setRemoteDescription(payload.offer);
-        attachMicTracks(peer);
-        if (currentUser?.role === "Teacher" || payload.fromRole === "Teacher") {
-          attachCameraTracks(peer);
-        }
-        const answer = await peer.createAnswer();
-        await peer.setLocalDescription(answer);
-        socket.emit("webrtc-answer", {
-          targetId: payload.from,
-          answer: peer.localDescription
-        });
-      } catch (error) {
-        console.warn("Failed to handle offer", error);
-      }
-    };
-
-    const handleWebRtcAnswer = async (payload) => {
-      const peer = peerConnectionsRef.current.get(payload.from);
-      if (!peer) return;
-      await peer.setRemoteDescription(payload.answer);
-    };
-
-    const handleWebRtcIce = async (payload) => {
-      const peer = peerConnectionsRef.current.get(payload.from);
-      if (!peer) return;
-      if (ignoreOfferRef.current.get(payload.from)) return;
-      try {
-        await peer.addIceCandidate(payload.candidate);
-      } catch (error) {
-        console.warn("Failed to add ICE candidate", error);
-      }
-    };
-
-    const handleWebRtcStop = () => {
-      if (currentUser?.role === "Student") {
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = null;
-        }
-        setHasRemoteStream(false);
-      }
-    };
-
-    const handleCameraStop = (payload) => {
-      if (currentUser?.role === "Student") {
-        if (!payload?.isTeacher) return;
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = null;
-        }
-        setHasRemoteStream(false);
-      } else if (currentUser?.role === "Teacher" && payload?.socketId) {
-        setRemoteVideoStreams((prev) =>
-          prev.filter((item) => item.socketId !== payload.socketId)
-        );
-      }
-    };
-
     const handleClassClosed = () => {
       setClassClosed(true);
       setApproved(false);
       if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = null;
       }
-      setAudioStreams([]);
+      setAudioTracks([]);
       setRemoteVideoStreams([]);
+      setTeacherVideoTrack(null);
+      setTeacherCameraTrack(null);
+      setTeacherScreenTrack(null);
       setSpeakingMap({});
-      if (micStreamRef.current) {
-        micStreamRef.current.getTracks().forEach((track) => track.stop());
-        micStreamRef.current = null;
-        setMicEnabled(false);
-      }
-      if (cameraStreamRef.current) {
-        cameraStreamRef.current.getTracks().forEach((track) => track.stop());
-        cameraStreamRef.current = null;
-        setCameraEnabled(false);
-      }
+      setMicEnabled(false);
+      setCameraEnabled(false);
+      liveKitRoomRef.current?.disconnect();
+      liveKitRoomRef.current = null;
     };
 
     socket.on("connect", handleConnect);
@@ -434,13 +287,7 @@ export default function Classroom({ user }) {
     socket.on("join-approved", handleJoinApproved);
     socket.on("approved-list", handleApprovedList);
     socket.on("student-approved", handleStudentApproved);
-    socket.on("webrtc-offer", handleWebRtcOffer);
-    socket.on("webrtc-answer", handleWebRtcAnswer);
-    socket.on("webrtc-ice", handleWebRtcIce);
-    socket.on("webrtc-stop", handleWebRtcStop);
-    socket.on("camera-stop", handleCameraStop);
     socket.on("class-closed", handleClassClosed);
-    socket.on("speaking", handleSpeaking);
 
     if (socket.connected) {
       handleConnect();
@@ -456,13 +303,7 @@ export default function Classroom({ user }) {
       socket.off("join-approved", handleJoinApproved);
       socket.off("approved-list", handleApprovedList);
       socket.off("student-approved", handleStudentApproved);
-      socket.off("webrtc-offer", handleWebRtcOffer);
-      socket.off("webrtc-answer", handleWebRtcAnswer);
-      socket.off("webrtc-ice", handleWebRtcIce);
-      socket.off("webrtc-stop", handleWebRtcStop);
-      socket.off("camera-stop", handleCameraStop);
       socket.off("class-closed", handleClassClosed);
-      socket.off("speaking", handleSpeaking);
     };
   }, [room, roomId, currentUser, needsJoinProfile, needsMediaAccess, mediaPermission]);
 
@@ -541,43 +382,10 @@ export default function Classroom({ user }) {
       }
       window.removeEventListener("pointerdown", unlockAudio);
       window.removeEventListener("keydown", unlockAudio);
-      stopMicMonitor();
-      peerConnectionsRef.current.forEach((peer) => peer.close());
-      peerConnectionsRef.current.clear();
-      micSendersRef.current.clear();
-      if (micStreamRef.current) {
-        micStreamRef.current.getTracks().forEach((track) => track.stop());
-        micStreamRef.current = null;
-      }
-      if (cameraStreamRef.current) {
-        cameraStreamRef.current.getTracks().forEach((track) => track.stop());
-        cameraStreamRef.current = null;
-      }
-      if (screenStreamRef.current) {
-        screenStreamRef.current.getTracks().forEach((track) => track.stop());
-      }
+      liveKitRoomRef.current?.disconnect();
+      liveKitRoomRef.current = null;
     };
   }, []);
-
-  useEffect(() => {
-    if (currentUser?.role !== "Student") return;
-    if (!approved) return;
-    if (approvedList.length === 0) return;
-    const socket = getSocket();
-    const localId = socket.id || localSocketIdRef.current;
-    if (!localId) return;
-    approvedList.forEach((entry) => {
-      if (!entry?.socketId) return;
-      if (entry.socketId === localId) return;
-      if (peerConnectionsRef.current.has(entry.socketId)) return;
-      const peer = createPeer(entry.socketId, "Student");
-      const shouldOffer = localId > entry.socketId;
-      if (shouldOffer) {
-        attachMicTracks(peer);
-        forceOffer(peer, entry.socketId);
-      }
-    });
-  }, [approved, approvedList, currentUser]);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -594,158 +402,163 @@ export default function Classroom({ user }) {
   }, [messages.length]);
 
   useEffect(() => {
-    if (localCameraRef.current && cameraStreamRef.current) {
-      localCameraRef.current.srcObject = cameraStreamRef.current;
-      localCameraRef.current.play?.().catch(() => {});
-    }
-  }, [cameraEnabled]);
+    if (!room || !currentUser) return;
+    if (currentUser.role === "Student" && !approved) return;
+    if (liveKitRoomRef.current) return;
+    let active = true;
 
-  const handleSpeaking = (payload) => {
-    if (!payload?.name) return;
-    setSpeakingMap((prev) => ({ ...prev, [payload.name]: payload.speaking }));
-  };
+    const connectLiveKit = async () => {
+      try {
+        const data = await fetchLivekitToken(roomId, currentUser);
+        if (!active) return;
+        const lkRoom = new Room({
+          adaptiveStream: true,
+          dynacast: true
+        });
+
+        lkRoom.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+          const role = participant?.metadata || "";
+          if (track.kind === Track.Kind.Audio) {
+            setAudioTracks((prev) => {
+              if (prev.some((item) => item.id === track.sid)) return prev;
+              return [...prev, { id: track.sid, track }];
+            });
+            return;
+          }
+          if (track.kind === Track.Kind.Video) {
+            if (role === "Teacher") {
+              if (publication.source === Track.Source.ScreenShare) {
+                setTeacherScreenTrack(track);
+              } else if (publication.source === Track.Source.Camera) {
+                setTeacherCameraTrack(track);
+              }
+            } else if (currentUser.role === "Teacher" && role === "Student") {
+              setRemoteVideoStreams((prev) => {
+                const key = `${participant.sid}-${track.sid}`;
+                if (prev.some((item) => item.id === key)) return prev;
+                return [
+                  ...prev,
+                  { id: key, track, name: participant.name || participant.identity }
+                ];
+              });
+            }
+          }
+        });
+
+        lkRoom.on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
+          const role = participant?.metadata || "";
+          if (track.kind === Track.Kind.Audio) {
+            setAudioTracks((prev) => prev.filter((item) => item.id !== track.sid));
+            return;
+          }
+          if (track.kind === Track.Kind.Video) {
+            if (role === "Teacher") {
+              if (publication.source === Track.Source.ScreenShare) {
+                setTeacherScreenTrack(null);
+              } else if (publication.source === Track.Source.Camera) {
+                setTeacherCameraTrack(null);
+              }
+            } else if (currentUser.role === "Teacher" && role === "Student") {
+              setRemoteVideoStreams((prev) =>
+                prev.filter((item) => item.id !== `${participant.sid}-${track.sid}`)
+              );
+            }
+          }
+        });
+
+        lkRoom.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
+          const next = {};
+          speakers.forEach((participant) => {
+            const name = participant.name || participant.identity;
+            if (name) next[name] = true;
+          });
+          setSpeakingMap(next);
+          if (currentUser?.name) {
+            setIsSpeaking(Boolean(next[currentUser.name]));
+          }
+        });
+
+        lkRoom.on(RoomEvent.LocalTrackPublished, (publication) => {
+          if (publication.source === Track.Source.ScreenShare) {
+            if (localVideoRef.current && publication.track) {
+              publication.track.attach(localVideoRef.current);
+            }
+            setIsSharing(true);
+          }
+          if (publication.source === Track.Source.Camera) {
+            if (localCameraRef.current && publication.track) {
+              publication.track.attach(localCameraRef.current);
+            }
+            setCameraEnabled(true);
+          }
+          if (publication.source === Track.Source.Microphone) {
+            setMicEnabled(true);
+          }
+        });
+
+        lkRoom.on(RoomEvent.LocalTrackUnpublished, (publication) => {
+          if (publication.source === Track.Source.ScreenShare) {
+            if (localVideoRef.current && publication.track) {
+              publication.track.detach(localVideoRef.current);
+            }
+            if (localVideoRef.current) {
+              localVideoRef.current.srcObject = null;
+            }
+            setIsSharing(false);
+          }
+          if (publication.source === Track.Source.Camera) {
+            if (localCameraRef.current && publication.track) {
+              publication.track.detach(localCameraRef.current);
+            }
+            if (localCameraRef.current) {
+              localCameraRef.current.srcObject = null;
+            }
+            setCameraEnabled(false);
+          }
+          if (publication.source === Track.Source.Microphone) {
+            setMicEnabled(false);
+          }
+        });
+
+        lkRoom.on(RoomEvent.Disconnected, () => {
+          setAudioTracks([]);
+          setRemoteVideoStreams([]);
+          setTeacherCameraTrack(null);
+          setTeacherScreenTrack(null);
+        });
+
+        await lkRoom.connect(data.url, data.token);
+        if (!active) {
+          lkRoom.disconnect();
+          return;
+        }
+        liveKitRoomRef.current = lkRoom;
+      } catch (error) {
+        console.error("Failed to connect LiveKit", error);
+      }
+    };
+
+    connectLiveKit();
+
+    return () => {
+      active = false;
+    };
+  }, [room, roomId, currentUser, approved]);
 
   useEffect(() => {
-    if (!currentUser || !micEnabled) return;
-    const socket = getSocket();
-    socket.emit("speaking", {
-      roomId,
-      user: currentUser,
-      speaking: isSpeaking
-    });
-  }, [isSpeaking, micEnabled, currentUser, roomId]);
-
-  const createPeer = (targetId, peerRole) => {
-    if (peerConnectionsRef.current.has(targetId)) {
-      return peerConnectionsRef.current.get(targetId);
+    if (teacherScreenTrack) {
+      setTeacherVideoTrack(teacherScreenTrack);
+      setHasRemoteStream(true);
+      return;
     }
-    const socket = getSocket();
-    const peer = new RTCPeerConnection(RTC_CONFIG);
-    peerConnectionsRef.current.set(targetId, peer);
-    if (peerRole) {
-      peerRolesRef.current.set(targetId, peerRole);
+    if (teacherCameraTrack) {
+      setTeacherVideoTrack(teacherCameraTrack);
+      setHasRemoteStream(true);
+      return;
     }
-    if (!politeRef.current.has(targetId)) {
-      const localId = localSocketIdRef.current;
-      const isPolite =
-        currentUser?.role === "Teacher" || (localId && targetId ? localId < targetId : true);
-      politeRef.current.set(targetId, isPolite);
-    }
-
-    peer.ontrack = (event) => {
-      const [stream] = event.streams;
-      if (event.track.kind === "video") {
-        if (currentUser?.role === "Student" && remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = stream;
-          setHasRemoteStream(true);
-          event.track.onended = () => {
-            if (remoteVideoRef.current?.srcObject === stream) {
-              remoteVideoRef.current.srcObject = null;
-            }
-            setHasRemoteStream(false);
-          };
-        } else if (currentUser?.role === "Teacher") {
-          event.track.onended = () => {
-            setRemoteVideoStreams((prev) => prev.filter((item) => item.stream !== stream));
-          };
-          setRemoteVideoStreams((prev) => {
-            const key = `${targetId}-${stream.id}`;
-            if (prev.some((item) => item.id === key)) return prev;
-            return [...prev, { id: key, stream, socketId: targetId }];
-          });
-        }
-        return;
-      }
-
-      if (event.track.kind === "audio") {
-        setAudioStreams((prev) => {
-          if (prev.some((item) => item.id === targetId)) return prev;
-          return [...prev, { id: targetId, stream }];
-        });
-      }
-    };
-
-    peer.onicecandidate = (event) => {
-      if (event.candidate) {
-        socket.emit("webrtc-ice", {
-          targetId,
-          candidate: event.candidate
-        });
-      }
-    };
-
-    peer.onnegotiationneeded = async () => {
-      try {
-        makingOfferRef.current.set(targetId, true);
-        const offer = await peer.createOffer();
-        if (peer.signalingState !== "stable") return;
-        await peer.setLocalDescription(offer);
-        socket.emit("webrtc-offer", {
-          targetId,
-          offer: peer.localDescription,
-          roomId,
-          fromRole: currentUser?.role
-        });
-      } catch (error) {
-        console.warn("Negotiation failed", error);
-      } finally {
-        makingOfferRef.current.set(targetId, false);
-      }
-    };
-
-    return peer;
-  };
-
-  const attachScreenTracks = (peer) => {
-    if (!screenStreamRef.current) return;
-    screenStreamRef.current.getTracks().forEach((track) => {
-      track.contentHint = "detail";
-      const sender = peer.addTrack(track, screenStreamRef.current);
-      applySenderParams(sender, "screen");
-    });
-  };
-
-  const attachMicTracks = (peer) => {
-    if (!micStreamRef.current) return;
-    const track = micStreamRef.current.getAudioTracks()[0];
-    if (!track) return;
-    track.contentHint = "speech";
-    const sender = micSendersRef.current.get(peer);
-    if (sender) {
-      sender.replaceTrack(track);
-      applySenderParams(sender, "audio");
-    } else {
-      const nextSender = peer.addTrack(track, micStreamRef.current);
-      micSendersRef.current.set(peer, nextSender);
-      applySenderParams(nextSender, "audio");
-    }
-  };
-
-  const attachCameraTracks = (peer) => {
-    if (!cameraStreamRef.current) return;
-    cameraStreamRef.current.getTracks().forEach((track) => {
-      track.contentHint = "motion";
-      const sender = peer.addTrack(track, cameraStreamRef.current);
-      applySenderParams(sender, "camera");
-    });
-  };
-
-  const forceOffer = async (peer, targetId) => {
-    if (!peer) return;
-    const socket = getSocket();
-    try {
-      const offer = await peer.createOffer();
-      await peer.setLocalDescription(offer);
-      socket.emit("webrtc-offer", {
-        targetId,
-        offer,
-        roomId,
-        fromRole: currentUser?.role
-      });
-    } catch (error) {
-      // Ignore failed offers.
-    }
-  };
+    setTeacherVideoTrack(null);
+    setHasRemoteStream(false);
+  }, [teacherScreenTrack, teacherCameraTrack]);
 
   const roleBadge = useMemo(() => {
     if (!currentUser) return "Guest";
@@ -843,24 +656,18 @@ export default function Classroom({ user }) {
         setShareError("อุปกรณ์นี้ไม่รองรับการแชร์หน้าจอ");
         return;
       }
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          width: { ideal: 1920, max: 1920 },
-          height: { ideal: 1080, max: 1080 },
-          frameRate: { ideal: 30, max: 30 }
-        },
-        audio: true
-      });
-      screenStreamRef.current = stream;
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
+      const lkRoom = liveKitRoomRef.current;
+      if (!lkRoom) {
+        setShareError("Live session ยังไม่พร้อม");
+        return;
       }
-      setIsSharing(true);
-      const socket = getSocket();
-      socket.emit("teacher-ready", { roomId });
-
-      stream.getVideoTracks()[0].addEventListener("ended", () => {
-        handleStopShare();
+      await lkRoom.localParticipant.setScreenShareEnabled(true, {
+        audio: true,
+        video: {
+          width: 1920,
+          height: 1080,
+          frameRate: 30
+        }
       });
     } catch (error) {
       setShareError("ไม่สามารถแชร์หน้าจอได้ โปรดลองใหม่อีกครั้ง");
@@ -868,22 +675,10 @@ export default function Classroom({ user }) {
   };
 
   const handleStopShare = () => {
-    if (screenStreamRef.current) {
-      screenStreamRef.current.getTracks().forEach((track) => track.stop());
-      screenStreamRef.current = null;
+    const lkRoom = liveKitRoomRef.current;
+    if (lkRoom) {
+      lkRoom.localParticipant.setScreenShareEnabled(false);
     }
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = null;
-    }
-    peerConnectionsRef.current.forEach((peer) => peer.close());
-    peerConnectionsRef.current.clear();
-    politeRef.current.clear();
-    makingOfferRef.current.clear();
-    ignoreOfferRef.current.clear();
-    peerRolesRef.current.clear();
-    setIsSharing(false);
-    const socket = getSocket();
-    socket.emit("webrtc-stop", { roomId });
   };
 
   const handleStartCamera = async () => {
@@ -893,25 +688,15 @@ export default function Classroom({ user }) {
         setCameraError("กรุณาหยุดแชร์หน้าจอก่อนเปิดกล้อง");
         return;
       }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 1280, max: 1280 },
-          height: { ideal: 720, max: 720 },
-          frameRate: { ideal: 24, max: 30 }
-        },
-        audio: false
-      });
-      cameraStreamRef.current = stream;
-      if (localCameraRef.current) {
-        localCameraRef.current.srcObject = stream;
+      const lkRoom = liveKitRoomRef.current;
+      if (!lkRoom) {
+        setCameraError("Live session ยังไม่พร้อม");
+        return;
       }
-      setCameraEnabled(true);
-      peerConnectionsRef.current.forEach((peer, peerId) => {
-        if (currentUser?.role === "Student") {
-          const peerRole = peerRolesRef.current.get(peerId);
-          if (peerRole !== "Teacher") return;
-        }
-        attachCameraTracks(peer);
+      await lkRoom.localParticipant.setCameraEnabled(true, {
+        width: 1280,
+        height: 720,
+        frameRate: 24
       });
     } catch (error) {
       const name = error?.name || "UnknownError";
@@ -921,56 +706,22 @@ export default function Classroom({ user }) {
   };
 
   const handleStopCamera = () => {
-    if (cameraStreamRef.current) {
-      cameraStreamRef.current.getTracks().forEach((track) => track.stop());
-      cameraStreamRef.current = null;
+    const lkRoom = liveKitRoomRef.current;
+    if (lkRoom) {
+      lkRoom.localParticipant.setCameraEnabled(false);
     }
-    peerConnectionsRef.current.forEach((peer) => {
-      const sender = peer
-        .getSenders()
-        .find((item) => item.track && item.track.kind === "video");
-      if (sender) {
-        sender.replaceTrack(null).catch(() => {});
-      }
-    });
-    const socket = getSocket();
-    socket.emit("camera-stop", { roomId });
-    if (localCameraRef.current) {
-      localCameraRef.current.pause?.();
-      localCameraRef.current.srcObject = null;
-    }
-    setCameraEnabled(false);
     setCameraError("");
   };
 
   const handleStartMic = async () => {
     setMicError("");
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          channelCount: 1,
-          sampleRate: 24000
-        }
-      });
-      micStreamRef.current = stream;
-      setMicEnabled(true);
-      startMicMonitor(stream);
-      const socket = getSocket();
-      const localId = socket.id || localSocketIdRef.current;
-      peerConnectionsRef.current.forEach((peer, peerId) => {
-        attachMicTracks(peer);
-        const peerRole = peerRolesRef.current.get(peerId);
-        const shouldOffer =
-          currentUser?.role === "Teacher" ||
-          peerRole === "Teacher" ||
-          (localId && localId > peerId);
-        if (shouldOffer) {
-          forceOffer(peer, peerId);
-        }
-      });
+      const lkRoom = liveKitRoomRef.current;
+      if (!lkRoom) {
+        setMicError("Live session ยังไม่พร้อม");
+        return;
+      }
+      await lkRoom.localParticipant.setMicrophoneEnabled(true);
     } catch (error) {
       const name = error?.name || "UnknownError";
       const message = error?.message || "Unknown reason";
@@ -979,56 +730,11 @@ export default function Classroom({ user }) {
   };
 
   const handleStopMic = () => {
-    if (micStreamRef.current) {
-      micStreamRef.current.getTracks().forEach((track) => track.stop());
-      micStreamRef.current = null;
+    const lkRoom = liveKitRoomRef.current;
+    if (lkRoom) {
+      lkRoom.localParticipant.setMicrophoneEnabled(false);
     }
-    micSendersRef.current.forEach((sender) => {
-      sender.replaceTrack(null).catch(() => {});
-    });
-    setMicEnabled(false);
     setMicError("");
-    stopMicMonitor();
-  };
-
-  const startMicMonitor = (stream) => {
-    try {
-      if (!audioCtxRef.current) {
-        audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-      }
-      const ctx = audioCtxRef.current;
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 256;
-      const source = ctx.createMediaStreamSource(stream);
-      source.connect(analyser);
-      micAnalyserRef.current = { analyser, source };
-      const data = new Uint8Array(analyser.frequencyBinCount);
-      const tick = () => {
-        analyser.getByteFrequencyData(data);
-        let sum = 0;
-        for (let i = 0; i < data.length; i += 1) {
-          sum += data[i];
-        }
-        const avg = sum / data.length;
-        setIsSpeaking(avg > 18);
-        micRafRef.current = requestAnimationFrame(tick);
-      };
-      tick();
-    } catch (error) {
-      setIsSpeaking(false);
-    }
-  };
-
-  const stopMicMonitor = () => {
-    if (micRafRef.current) {
-      cancelAnimationFrame(micRafRef.current);
-      micRafRef.current = null;
-    }
-    if (micAnalyserRef.current) {
-      micAnalyserRef.current.source.disconnect();
-      micAnalyserRef.current = null;
-    }
-    setIsSpeaking(false);
   };
 
   const handleCloseClass = () => {
@@ -1056,24 +762,19 @@ export default function Classroom({ user }) {
   };
 
   const handleRefreshLive = () => {
-    const socket = getSocket();
-    peerConnectionsRef.current.forEach((peer) => peer.close());
-    peerConnectionsRef.current.clear();
-    micSendersRef.current.clear();
-    politeRef.current.clear();
-    makingOfferRef.current.clear();
-    ignoreOfferRef.current.clear();
-    peerRolesRef.current.clear();
+    liveKitRoomRef.current?.disconnect();
+    liveKitRoomRef.current = null;
     setRemoteVideoStreams([]);
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.srcObject = null;
-    }
+    setTeacherCameraTrack(null);
+    setTeacherScreenTrack(null);
+    setAudioTracks([]);
     setHasRemoteStream(false);
     if (currentUser?.role === "Student") {
       setApproved(false);
     }
 
     if (!currentUser) return;
+    const socket = getSocket();
     socket.disconnect();
     socket.connect();
   };
@@ -1277,12 +978,10 @@ export default function Classroom({ user }) {
                   playsInline
                 />
               ) : (
-                <video
-                  ref={remoteVideoRef}
+                <RemoteVideo
+                  track={teacherVideoTrack}
                   className="h-full w-full object-cover"
-                  autoPlay
-                  muted
-                  playsInline
+                  videoRef={remoteVideoRef}
                 />
               )}
               {cameraEnabled && (
@@ -1423,8 +1122,8 @@ export default function Classroom({ user }) {
           </section>
 
           <aside className="glass-panel flex h-[640px] flex-col rounded-3xl p-4 md:h-[680px] md:p-6 soft-shadow">
-            {audioStreams.map((item) => (
-              <AudioPlayer key={item.id} stream={item.stream} />
+            {audioTracks.map((item) => (
+              <AudioPlayer key={item.id} track={item.track} />
             ))}
             {currentUser?.role === "Student" && (
               <div className="rounded-2xl border border-ink-900/10 bg-white/70 p-3 text-sm text-ink-700">
@@ -1518,11 +1217,10 @@ export default function Classroom({ user }) {
                     <div key={item.id} className="relative">
                       <RemoteVideo
                         className="h-24 w-full rounded-xl object-cover"
-                        stream={item.stream}
+                        track={item.track}
                       />
                       <span className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-black/50 px-2 py-0.5 text-[10px] text-white">
-                        {approvedList.find((entry) => entry.socketId === item.socketId)?.user?.name ||
-                          "Student"}
+                        {item.name || "Student"}
                       </span>
                     </div>
                   ))}

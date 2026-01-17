@@ -1,11 +1,38 @@
 version: "3.9"
 
 services:
+  livekit:
+    image: livekit/livekit-server:v1.6.2
+    command: >
+      /bin/sh -c "cat > /etc/livekit.yaml <<EOF
+      port: 7880
+      rtc:
+        tcp_port: 7881
+        port_range_start: 50000
+        port_range_end: 51000
+      keys:
+        ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
+      EOF
+      livekit-server --config /etc/livekit.yaml"
+    environment:
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "50000-51000:50000-51000/udp"
+    restart: unless-stopped
+
   server:
     build:
       context: ./server
     environment:
       NODE_ENV: production
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      LIVEKIT_URL: ${LIVEKIT_URL}
+    depends_on:
+      - livekit
     expose:
       - "4000"
 
