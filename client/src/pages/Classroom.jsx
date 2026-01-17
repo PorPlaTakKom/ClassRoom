@@ -12,7 +12,7 @@ import {
   Users2,
   Video
 } from "lucide-react";
-import { Room, RoomEvent, Track, TrackEvent } from "livekit-client";
+import { Room, RoomEvent, Track, TrackEvent, VideoPreset } from "livekit-client";
 import {
   deleteRoomFile,
   fetchLivekitToken,
@@ -107,6 +107,8 @@ export default function Classroom() {
   const [teacherVideoTrack, setTeacherVideoTrack] = useState(null);
   const [teacherCameraTrack, setTeacherCameraTrack] = useState(null);
   const [teacherScreenTrack, setTeacherScreenTrack] = useState(null);
+  const [liveKitStatus, setLiveKitStatus] = useState("idle");
+  const [liveKitConnectKey, setLiveKitConnectKey] = useState(0);
   const chatEndRef = useRef(null);
   const [cameraEnabled, setCameraEnabled] = useState(false);
   const [cameraError, setCameraError] = useState("");
@@ -382,6 +384,7 @@ export default function Classroom() {
       try {
         const data = await fetchLivekitToken(roomId, currentUser);
         if (!active) return;
+        setLiveKitStatus("connecting");
         const token =
           typeof data?.token === "string"
             ? data.token
@@ -391,7 +394,11 @@ export default function Classroom() {
         }
         const lkRoom = new Room({
           adaptiveStream: true,
-          dynacast: true
+          dynacast: true,
+          publishDefaults: {
+            videoSimulcastLayers: [VideoPreset.h360, VideoPreset.h720],
+            screenShareSimulcastLayers: [VideoPreset.h720, VideoPreset.h1080]
+          }
         });
 
         const setTeacherTrack = (publication, track) => {
@@ -572,11 +579,16 @@ export default function Classroom() {
           }
         });
 
+        lkRoom.on(RoomEvent.ConnectionStateChanged, (state) => {
+          setLiveKitStatus(state);
+        });
+
         lkRoom.on(RoomEvent.Disconnected, () => {
           setAudioTracks([]);
           setRemoteVideoStreams([]);
           setTeacherCameraTrack(null);
           setTeacherScreenTrack(null);
+          setLiveKitStatus("disconnected");
         });
 
         await lkRoom.connect(data.url, token);
@@ -585,8 +597,10 @@ export default function Classroom() {
           return;
         }
         liveKitRoomRef.current = lkRoom;
+        setLiveKitStatus(lkRoom.state);
       } catch (error) {
         console.error("Failed to connect LiveKit", error);
+        setLiveKitStatus("error");
       }
     };
 
@@ -595,7 +609,7 @@ export default function Classroom() {
     return () => {
       active = false;
     };
-  }, [room, roomId, currentUser, approved]);
+  }, [room, roomId, currentUser, approved, liveKitConnectKey]);
 
   useEffect(() => {
     if (teacherScreenTrack) {
@@ -636,6 +650,12 @@ export default function Classroom() {
     if (!currentUser) return "Guest";
     return currentUser.role === "Teacher" ? "Teacher" : approved ? "Student" : "Pending";
   }, [currentUser, approved]);
+
+  const handleReconnectLiveKit = () => {
+    liveKitRoomRef.current?.disconnect();
+    liveKitRoomRef.current = null;
+    setLiveKitConnectKey((prev) => prev + 1);
+  };
 
   const handleSend = (event) => {
     event.preventDefault();
@@ -1035,6 +1055,18 @@ export default function Classroom() {
                 <h2 className="font-display text-xl text-ink-900">Live Video</h2>
               </div>
               <div className="flex items-center gap-2">
+                <span className="rounded-full border border-ink-900/15 bg-white/70 px-3 py-1 text-xs text-ink-700">
+                  LiveKit: {liveKitStatus}
+                </span>
+                {liveKitStatus !== "connected" && (
+                  <button
+                    type="button"
+                    onClick={handleReconnectLiveKit}
+                    className="rounded-full border border-ink-900/20 bg-white/70 px-3 py-1 text-xs text-ink-700 transition hover:border-ink-900/40"
+                  >
+                    Reconnect
+                  </button>
+                )}
                 {currentUser?.role === "Student" && (
                   <button
                     type="button"
