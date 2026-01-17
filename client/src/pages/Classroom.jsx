@@ -97,6 +97,9 @@ export default function Classroom({ user }) {
   const remoteVideoRef = useRef(null);
   const peerConnectionsRef = useRef(new Map());
   const peerRolesRef = useRef(new Map());
+  const politeRef = useRef(new Map());
+  const makingOfferRef = useRef(new Map());
+  const ignoreOfferRef = useRef(new Map());
   const localSocketIdRef = useRef(null);
   const screenStreamRef = useRef(null);
   const [room, setRoom] = useState(null);
@@ -335,17 +338,30 @@ export default function Classroom({ user }) {
     const handleWebRtcOffer = async (payload) => {
       const socket = getSocket();
       const peer = createPeer(payload.from, payload.fromRole);
-      await peer.setRemoteDescription(payload.offer);
-      attachMicTracks(peer);
-      if (currentUser?.role === "Teacher" || payload.fromRole === "Teacher") {
-        attachCameraTracks(peer);
+      const polite = politeRef.current.get(payload.from) ?? true;
+      const makingOffer = makingOfferRef.current.get(payload.from);
+      const offerCollision = payload.offer && (makingOffer || peer.signalingState !== "stable");
+      const ignoreOffer = !polite && offerCollision;
+      ignoreOfferRef.current.set(payload.from, ignoreOffer);
+      if (ignoreOffer) return;
+      try {
+        if (offerCollision) {
+          await peer.setLocalDescription({ type: "rollback" });
+        }
+        await peer.setRemoteDescription(payload.offer);
+        attachMicTracks(peer);
+        if (currentUser?.role === "Teacher" || payload.fromRole === "Teacher") {
+          attachCameraTracks(peer);
+        }
+        const answer = await peer.createAnswer();
+        await peer.setLocalDescription(answer);
+        socket.emit("webrtc-answer", {
+          targetId: payload.from,
+          answer: peer.localDescription
+        });
+      } catch (error) {
+        console.warn("Failed to handle offer", error);
       }
-      const answer = await peer.createAnswer();
-      await peer.setLocalDescription(answer);
-      socket.emit("webrtc-answer", {
-        targetId: payload.from,
-        answer
-      });
     };
 
     const handleWebRtcAnswer = async (payload) => {
@@ -357,6 +373,7 @@ export default function Classroom({ user }) {
     const handleWebRtcIce = async (payload) => {
       const peer = peerConnectionsRef.current.get(payload.from);
       if (!peer) return;
+      if (ignoreOfferRef.current.get(payload.from)) return;
       try {
         await peer.addIceCandidate(payload.candidate);
       } catch (error) {
@@ -608,6 +625,12 @@ export default function Classroom({ user }) {
     if (peerRole) {
       peerRolesRef.current.set(targetId, peerRole);
     }
+    if (!politeRef.current.has(targetId)) {
+      const localId = localSocketIdRef.current;
+      const isPolite =
+        currentUser?.role === "Teacher" || (localId && targetId ? localId < targetId : true);
+      politeRef.current.set(targetId, isPolite);
+    }
 
     peer.ontrack = (event) => {
       const [stream] = event.streams;
@@ -653,16 +676,20 @@ export default function Classroom({ user }) {
 
     peer.onnegotiationneeded = async () => {
       try {
+        makingOfferRef.current.set(targetId, true);
         const offer = await peer.createOffer();
+        if (peer.signalingState !== "stable") return;
         await peer.setLocalDescription(offer);
         socket.emit("webrtc-offer", {
           targetId,
-          offer,
+          offer: peer.localDescription,
           roomId,
           fromRole: currentUser?.role
         });
       } catch (error) {
         console.warn("Negotiation failed", error);
+      } finally {
+        makingOfferRef.current.set(targetId, false);
       }
     };
 
@@ -850,6 +877,10 @@ export default function Classroom({ user }) {
     }
     peerConnectionsRef.current.forEach((peer) => peer.close());
     peerConnectionsRef.current.clear();
+    politeRef.current.clear();
+    makingOfferRef.current.clear();
+    ignoreOfferRef.current.clear();
+    peerRolesRef.current.clear();
     setIsSharing(false);
     const socket = getSocket();
     socket.emit("webrtc-stop", { roomId });
@@ -1029,6 +1060,10 @@ export default function Classroom({ user }) {
     peerConnectionsRef.current.forEach((peer) => peer.close());
     peerConnectionsRef.current.clear();
     micSendersRef.current.clear();
+    politeRef.current.clear();
+    makingOfferRef.current.clear();
+    ignoreOfferRef.current.clear();
+    peerRolesRef.current.clear();
     setRemoteVideoStreams([]);
     if (remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = null;
