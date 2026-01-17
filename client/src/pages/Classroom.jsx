@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Camera,
@@ -25,6 +25,25 @@ import { getStoredUser, storeUser } from "../lib/storage.js";
 const RTC_CONFIG = {
   iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }]
 };
+
+const RemoteVideo = memo(function RemoteVideo({ stream, className }) {
+  const videoRef = useRef(null);
+
+  useEffect(() => {
+    if (!videoRef.current) return;
+    videoRef.current.srcObject = stream;
+  }, [stream]);
+
+  return (
+    <video
+      ref={videoRef}
+      className={className}
+      autoPlay
+      muted
+      playsInline
+    />
+  );
+});
 
 const applySenderParams = (sender, kind) => {
   if (!sender?.getParameters) return;
@@ -1409,15 +1428,10 @@ export default function Classroom({ user }) {
                 <p className="text-xs font-semibold text-ink-600">กล้องนักเรียน</p>
                 <div className="mt-3 grid grid-cols-2 gap-3">
                   {remoteVideoStreams.map((item) => (
-                    <video
+                    <RemoteVideo
                       key={item.id}
                       className="h-24 w-full rounded-xl object-cover"
-                      autoPlay
-                      muted
-                      playsInline
-                      ref={(el) => {
-                        if (el) el.srcObject = item.stream;
-                      }}
+                      stream={item.stream}
                     />
                   ))}
                 </div>
