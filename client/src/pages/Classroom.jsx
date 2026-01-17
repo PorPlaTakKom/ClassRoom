@@ -12,7 +12,7 @@ import {
   Users2,
   Video
 } from "lucide-react";
-import { Room, RoomEvent, Track } from "livekit-client";
+import { Room, RoomEvent, Track, TrackEvent } from "livekit-client";
 import {
   deleteRoomFile,
   fetchLivekitToken,
@@ -394,6 +394,20 @@ export default function Classroom({ user }) {
           dynacast: true
         });
 
+        const removeStudentTrack = (participantSid, trackSid) => {
+          setRemoteVideoStreams((prev) =>
+            prev.filter((item) => item.id !== `${participantSid}-${trackSid}`)
+          );
+        };
+
+        const addStudentTrack = (participant, track) => {
+          setRemoteVideoStreams((prev) => {
+            const key = `${participant.sid}-${track.sid}`;
+            if (prev.some((item) => item.id === key)) return prev;
+            return [...prev, { id: key, track, name: getParticipantName(participant) }];
+          });
+        };
+
         lkRoom.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
           const role = participant?.metadata || "";
           if (track.kind === Track.Kind.Audio) {
@@ -411,14 +425,9 @@ export default function Classroom({ user }) {
                 setTeacherCameraTrack(track);
               }
             } else if (currentUser.role === "Teacher" && role === "Student") {
-              setRemoteVideoStreams((prev) => {
-                const key = `${participant.sid}-${track.sid}`;
-                if (prev.some((item) => item.id === key)) return prev;
-                return [
-                  ...prev,
-                  { id: key, track, name: getParticipantName(participant) }
-                ];
-              });
+              addStudentTrack(participant, track);
+              track.on(TrackEvent.Muted, () => removeStudentTrack(participant.sid, track.sid));
+              track.on(TrackEvent.Unmuted, () => addStudentTrack(participant, track));
             }
           }
         });
@@ -437,9 +446,7 @@ export default function Classroom({ user }) {
                 setTeacherCameraTrack(null);
               }
             } else if (currentUser.role === "Teacher" && role === "Student") {
-              setRemoteVideoStreams((prev) =>
-                prev.filter((item) => item.id !== `${participant.sid}-${track.sid}`)
-              );
+              removeStudentTrack(participant.sid, track.sid);
             }
           }
         });
