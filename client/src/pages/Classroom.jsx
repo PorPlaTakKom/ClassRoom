@@ -849,7 +849,7 @@ export default function Classroom({ user }) {
           height: { ideal: 1080, max: 1080 },
           frameRate: { ideal: 30, max: 30 }
         },
-        audio: false
+        audio: true
       });
       screenStreamRef.current = stream;
       if (localVideoRef.current) {
