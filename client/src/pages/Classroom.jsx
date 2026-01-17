@@ -672,6 +672,11 @@ export default function Classroom({ user }) {
           frameRate: 30
         }
       });
+      setIsSharing(true);
+      const publication = lkRoom.localParticipant.getTrackPublication(Track.Source.ScreenShare);
+      if (publication?.track && localVideoRef.current) {
+        publication.track.attach(localVideoRef.current);
+      }
     } catch (error) {
       setShareError("ไม่สามารถแชร์หน้าจอได้ โปรดลองใหม่อีกครั้ง");
     }
@@ -681,7 +686,15 @@ export default function Classroom({ user }) {
     const lkRoom = liveKitRoomRef.current;
     if (lkRoom) {
       lkRoom.localParticipant.setScreenShareEnabled(false);
+      const publication = lkRoom.localParticipant.getTrackPublication(Track.Source.ScreenShare);
+      if (publication?.track && localVideoRef.current) {
+        publication.track.detach(localVideoRef.current);
+      }
     }
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = null;
+    }
+    setIsSharing(false);
   };
 
   const handleStartCamera = async () => {
@@ -701,6 +714,11 @@ export default function Classroom({ user }) {
         height: 720,
         frameRate: 24
       });
+      setCameraEnabled(true);
+      const publication = lkRoom.localParticipant.getTrackPublication(Track.Source.Camera);
+      if (publication?.track && localCameraRef.current) {
+        publication.track.attach(localCameraRef.current);
+      }
     } catch (error) {
       const name = error?.name || "UnknownError";
       const message = error?.message || "Unknown reason";
@@ -712,7 +730,15 @@ export default function Classroom({ user }) {
     const lkRoom = liveKitRoomRef.current;
     if (lkRoom) {
       lkRoom.localParticipant.setCameraEnabled(false);
+      const publication = lkRoom.localParticipant.getTrackPublication(Track.Source.Camera);
+      if (publication?.track && localCameraRef.current) {
+        publication.track.detach(localCameraRef.current);
+      }
     }
+    if (localCameraRef.current) {
+      localCameraRef.current.srcObject = null;
+    }
+    setCameraEnabled(false);
     setCameraError("");
   };
 
@@ -725,6 +751,7 @@ export default function Classroom({ user }) {
         return;
       }
       await lkRoom.localParticipant.setMicrophoneEnabled(true);
+      setMicEnabled(true);
     } catch (error) {
       const name = error?.name || "UnknownError";
       const message = error?.message || "Unknown reason";
@@ -737,6 +764,7 @@ export default function Classroom({ user }) {
     if (lkRoom) {
       lkRoom.localParticipant.setMicrophoneEnabled(false);
     }
+    setMicEnabled(false);
     setMicError("");
   };
 

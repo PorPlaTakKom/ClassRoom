@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   livekit:
-    image: livekit/livekit-server:v1.6.2
+    image: livekit/livekit-server:latest
     container_name: livekit
     command: livekit-server
     environment:
