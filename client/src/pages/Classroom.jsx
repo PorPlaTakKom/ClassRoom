@@ -81,6 +81,7 @@ function AudioPlayer({ stream }) {
   useEffect(() => {
     if (audioRef.current) {
       audioRef.current.srcObject = stream;
+      audioRef.current.play?.().catch(() => {});
     }
   }, [stream]);
 
@@ -926,7 +927,19 @@ export default function Classroom({ user }) {
       micStreamRef.current = stream;
       setMicEnabled(true);
       startMicMonitor(stream);
-      peerConnectionsRef.current.forEach((peer) => attachMicTracks(peer));
+      const socket = getSocket();
+      const localId = socket.id || localSocketIdRef.current;
+      peerConnectionsRef.current.forEach((peer, peerId) => {
+        attachMicTracks(peer);
+        const peerRole = peerRolesRef.current.get(peerId);
+        const shouldOffer =
+          currentUser?.role === "Teacher" ||
+          peerRole === "Teacher" ||
+          (localId && localId > peerId);
+        if (shouldOffer) {
+          forceOffer(peer, peerId);
+        }
+      });
     } catch (error) {
       const name = error?.name || "UnknownError";
       const message = error?.message || "Unknown reason";
