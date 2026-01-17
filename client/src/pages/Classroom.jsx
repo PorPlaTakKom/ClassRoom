@@ -31,9 +31,10 @@ const RemoteVideo = memo(function RemoteVideo({ track, className, videoRef: exte
 
   useEffect(() => {
     if (!videoRef.current) return;
-    if (track) {
-      track.attach(videoRef.current);
-      return () => track.detach(videoRef.current);
+    const currentTrack = track;
+    if (currentTrack?.attach) {
+      currentTrack.attach(videoRef.current);
+      return () => currentTrack.detach?.(videoRef.current);
     }
     videoRef.current.srcObject = null;
     return undefined;
@@ -52,10 +53,11 @@ function AudioPlayer({ track }) {
 
   useEffect(() => {
     if (audioRef.current) {
-      if (track) {
-        track.attach(audioRef.current);
+      const currentTrack = track;
+      if (currentTrack?.attach) {
+        currentTrack.attach(audioRef.current);
         audioRef.current.play?.().catch(() => {});
-        return () => track.detach(audioRef.current);
+        return () => currentTrack.detach?.(audioRef.current);
       }
     }
     return undefined;
@@ -615,8 +617,9 @@ export default function Classroom() {
     if (!lkRoom || !localCameraRef.current) return;
     const publication = lkRoom.localParticipant.getTrackPublication(Track.Source.Camera);
     if (!cameraEnabled || !publication?.track) return;
-    publication.track.attach(localCameraRef.current);
-    return () => publication.track.detach(localCameraRef.current);
+    const track = publication.track;
+    track.attach(localCameraRef.current);
+    return () => track.detach?.(localCameraRef.current);
   }, [cameraEnabled]);
 
   useEffect(() => {
@@ -624,8 +627,9 @@ export default function Classroom() {
     if (!lkRoom || !localVideoRef.current) return;
     const publication = lkRoom.localParticipant.getTrackPublication(Track.Source.ScreenShare);
     if (!isSharing || !publication?.track) return;
-    publication.track.attach(localVideoRef.current);
-    return () => publication.track.detach(localVideoRef.current);
+    const track = publication.track;
+    track.attach(localVideoRef.current);
+    return () => track.detach?.(localVideoRef.current);
   }, [isSharing]);
 
   const roleBadge = useMemo(() => {
