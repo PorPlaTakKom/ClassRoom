@@ -145,18 +145,30 @@ export default function Classroom({ user }) {
 
   useEffect(() => {
     if (!room || !currentUser || needsJoinProfile) return;
-    if (!navigator.mediaDevices?.getUserMedia) return;
-    navigator.mediaDevices
-      .getUserMedia({ audio: true, video: true })
-      .then((stream) => {
-        stream.getTracks().forEach((track) => track.stop());
-        setMediaPermission("granted");
-        setNeedsMediaAccess(false);
-      })
-      .catch(() => {
-        setMediaPermission("denied");
+    if (currentUser.role !== "Student") {
+      setNeedsMediaAccess(false);
+      return;
+    }
+    if (!navigator.permissions?.query) {
+      setMediaPermission("unknown");
+      setNeedsMediaAccess(true);
+      return;
+    }
+    const checkPermissions = async () => {
+      try {
+        const [mic, cam] = await Promise.all([
+          navigator.permissions.query({ name: "microphone" }),
+          navigator.permissions.query({ name: "camera" })
+        ]);
+        const granted = mic.state === "granted" && cam.state === "granted";
+        setMediaPermission(granted ? "granted" : "prompt");
+        setNeedsMediaAccess(!granted);
+      } catch (error) {
+        setMediaPermission("unknown");
         setNeedsMediaAccess(true);
-      });
+      }
+    };
+    checkPermissions();
   }, [room, currentUser, needsJoinProfile]);
 
   const requestMediaPermissions = async () => {
@@ -469,15 +481,38 @@ export default function Classroom({ user }) {
           }
         });
 
+        lkRoom.on(RoomEvent.TrackUnpublished, (publication, participant) => {
+          const role = participant?.metadata || "";
+          if (publication.kind === Track.Kind.Audio) {
+            setAudioTracks((prev) => prev.filter((item) => item.id !== publication.trackSid));
+            return;
+          }
+          if (publication.kind === Track.Kind.Video) {
+            if (role === "Teacher") {
+              if (publication.source === Track.Source.ScreenShare) {
+                setTeacherScreenTrack(null);
+              } else if (publication.source === Track.Source.Camera) {
+                setTeacherCameraTrack(null);
+              }
+            } else if (currentUser.role === "Teacher" && role === "Student") {
+              setRemoteVideoStreams((prev) =>
+                prev.filter((item) => !item.id.startsWith(`${participant.sid}-`))
+              );
+            }
+          }
+        });
+
         lkRoom.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
           const next = {};
           speakers.forEach((participant) => {
             const name = participant.name || participant.identity;
-            if (name) next[name] = true;
+            if (name) {
+              next[name.toLowerCase()] = true;
+            }
           });
           setSpeakingMap(next);
           if (currentUser?.name) {
-            setIsSpeaking(Boolean(next[currentUser.name]));
+            setIsSpeaking(Boolean(next[currentUser.name.toLowerCase()]));
           }
         });
 
@@ -562,6 +597,24 @@ export default function Classroom({ user }) {
     setTeacherVideoTrack(null);
     setHasRemoteStream(false);
   }, [teacherScreenTrack, teacherCameraTrack]);
+
+  useEffect(() => {
+    const lkRoom = liveKitRoomRef.current;
+    if (!lkRoom || !localCameraRef.current) return;
+    const publication = lkRoom.localParticipant.getTrackPublication(Track.Source.Camera);
+    if (!cameraEnabled || !publication?.track) return;
+    publication.track.attach(localCameraRef.current);
+    return () => publication.track.detach(localCameraRef.current);
+  }, [cameraEnabled]);
+
+  useEffect(() => {
+    const lkRoom = liveKitRoomRef.current;
+    if (!lkRoom || !localVideoRef.current) return;
+    const publication = lkRoom.localParticipant.getTrackPublication(Track.Source.ScreenShare);
+    if (!isSharing || !publication?.track) return;
+    publication.track.attach(localVideoRef.current);
+    return () => publication.track.detach(localVideoRef.current);
+  }, [isSharing]);
 
   const roleBadge = useMemo(() => {
     if (!currentUser) return "Guest";
@@ -1171,7 +1224,7 @@ export default function Classroom({ user }) {
                       <span
                         key={entry.socketId}
                         className={`rounded-full border px-2 py-0.5 text-[11px] ${
-                          speakingMap[entry.user?.name]
+                          speakingMap[entry.user?.name?.toLowerCase()]
                             ? "border-emerald-300 bg-emerald-100 text-emerald-800 animate-pulse"
                             : "border-ink-900/10 bg-white/70 text-ink-800"
                         }`}
@@ -1227,7 +1280,7 @@ export default function Classroom({ user }) {
                         <span
                           key={entry.socketId}
                           className={`rounded-full border px-3 py-1 text-xs ${
-                            speakingMap[entry.user?.name]
+                            speakingMap[entry.user?.name?.toLowerCase()]
                               ? "border-emerald-300 bg-emerald-100 text-emerald-800 animate-pulse"
                               : "border-ink-900/10 bg-white/70 text-ink-800"
                           }`}
