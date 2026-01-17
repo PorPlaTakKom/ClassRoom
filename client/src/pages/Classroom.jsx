@@ -407,6 +407,13 @@ export default function Classroom({ user }) {
       try {
         const data = await fetchLivekitToken(roomId, currentUser);
         if (!active) return;
+        const token =
+          typeof data?.token === "string"
+            ? data.token
+            : data?.token?.token || data?.token?.accessToken || "";
+        if (!token) {
+          throw new Error("LiveKit token is missing or invalid");
+        }
         const lkRoom = new Room({
           adaptiveStream: true,
           dynacast: true
@@ -523,7 +530,7 @@ export default function Classroom({ user }) {
           setTeacherScreenTrack(null);
         });
 
-        await lkRoom.connect(data.url, data.token);
+        await lkRoom.connect(data.url, token);
         if (!active) {
           lkRoom.disconnect();
           return;
