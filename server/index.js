@@ -168,7 +168,7 @@ app.post("/api/login", (req, res) => {
   return res.status(401).json({ message: "Invalid credentials" });
 });
 
-app.post("/api/livekit/token", (req, res) => {
+app.post("/api/livekit/token", async (req, res) => {
   const { roomId, user } = req.body || {};
   if (!roomId || !user?.name || !user?.role) {
     return res.status(400).json({ message: "Missing room or user" });
@@ -202,7 +202,8 @@ app.post("/api/livekit/token", (req, res) => {
     canPublish: true,
     canSubscribe: true
   });
-  res.json({ token: token.toJwt(), url: livekitUrl });
+  const jwt = await token.toJwt();
+  res.json({ token: jwt, url: livekitUrl });
 });
 
 app.post("/api/rooms", (req, res) => {
