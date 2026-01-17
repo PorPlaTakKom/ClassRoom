@@ -14,7 +14,7 @@ export default function Dashboard({ user }) {
     setLoading(true);
     try {
       const data = await fetchRooms();
-      setRooms(data.rooms);
+      setRooms(Array.isArray(data.rooms) ? data.rooms : []);
     } finally {
       setLoading(false);
     }
@@ -36,10 +36,11 @@ export default function Dashboard({ user }) {
   }, [reload]);
 
   const myRooms = useMemo(() => {
+    const safeRooms = Array.isArray(rooms) ? rooms : [];
     if (user.role === "Teacher") {
-      return rooms.filter((room) => room.teacherName === user.name);
+      return safeRooms.filter((room) => room.teacherName === user.name);
     }
-    return rooms;
+    return safeRooms;
   }, [rooms, user]);
 
   const handleCreate = async (event) => {
