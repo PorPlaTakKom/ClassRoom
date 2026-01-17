@@ -12,7 +12,14 @@ import {
   Users2,
   Video
 } from "lucide-react";
-import { Room, RoomEvent, Track, TrackEvent, VideoPreset } from "livekit-client";
+import {
+  Room,
+  RoomEvent,
+  Track,
+  TrackEvent,
+  VideoPreset,
+  createLocalScreenTracks
+} from "livekit-client";
 import {
   deleteRoomFile,
   fetchLivekitToken,
@@ -107,12 +114,11 @@ export default function Classroom() {
   const [teacherVideoTrack, setTeacherVideoTrack] = useState(null);
   const [teacherCameraTrack, setTeacherCameraTrack] = useState(null);
   const [teacherScreenTrack, setTeacherScreenTrack] = useState(null);
-  const [liveKitStatus, setLiveKitStatus] = useState("idle");
-  const [liveKitConnectKey, setLiveKitConnectKey] = useState(0);
   const chatEndRef = useRef(null);
   const [cameraEnabled, setCameraEnabled] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const localCameraRef = useRef(null);
+  const screenTracksRef = useRef([]);
   const [remoteVideoStreams, setRemoteVideoStreams] = useState([]);
   const [needsJoinProfile, setNeedsJoinProfile] = useState(false);
   const [joinName, setJoinName] = useState("");
@@ -384,7 +390,6 @@ export default function Classroom() {
       try {
         const data = await fetchLivekitToken(roomId, currentUser);
         if (!active) return;
-        setLiveKitStatus("connecting");
         const token =
           typeof data?.token === "string"
             ? data.token
@@ -579,16 +584,11 @@ export default function Classroom() {
           }
         });
 
-        lkRoom.on(RoomEvent.ConnectionStateChanged, (state) => {
-          setLiveKitStatus(state);
-        });
-
         lkRoom.on(RoomEvent.Disconnected, () => {
           setAudioTracks([]);
           setRemoteVideoStreams([]);
           setTeacherCameraTrack(null);
           setTeacherScreenTrack(null);
-          setLiveKitStatus("disconnected");
         });
 
         await lkRoom.connect(data.url, token);
@@ -597,10 +597,8 @@ export default function Classroom() {
           return;
         }
         liveKitRoomRef.current = lkRoom;
-        setLiveKitStatus(lkRoom.state);
       } catch (error) {
         console.error("Failed to connect LiveKit", error);
-        setLiveKitStatus("error");
       }
     };
 
@@ -609,7 +607,7 @@ export default function Classroom() {
     return () => {
       active = false;
     };
-  }, [room, roomId, currentUser, approved, liveKitConnectKey]);
+  }, [room, roomId, currentUser, approved]);
 
   useEffect(() => {
     if (teacherScreenTrack) {
@@ -650,12 +648,6 @@ export default function Classroom() {
     if (!currentUser) return "Guest";
     return currentUser.role === "Teacher" ? "Teacher" : approved ? "Student" : "Pending";
   }, [currentUser, approved]);
-
-  const handleReconnectLiveKit = () => {
-    liveKitRoomRef.current?.disconnect();
-    liveKitRoomRef.current = null;
-    setLiveKitConnectKey((prev) => prev + 1);
-  };
 
   const handleSend = (event) => {
     event.preventDefault();
@@ -753,7 +745,7 @@ export default function Classroom() {
         setShareError("Live session ยังไม่พร้อม");
         return;
       }
-      await lkRoom.localParticipant.setScreenShareEnabled(true, {
+      const tracks = await createLocalScreenTracks({
         audio: true,
         video: {
           width: 1920,
@@ -761,10 +753,12 @@ export default function Classroom() {
           frameRate: 30
         }
       });
+      screenTracksRef.current = tracks;
+      await Promise.all(tracks.map((track) => lkRoom.localParticipant.publishTrack(track)));
       setIsSharing(true);
-      const publication = lkRoom.localParticipant.getTrackPublication(Track.Source.ScreenShare);
-      if (publication?.track && localVideoRef.current) {
-        publication.track.attach(localVideoRef.current);
+      const videoTrack = tracks.find((track) => track.kind === Track.Kind.Video);
+      if (videoTrack && localVideoRef.current) {
+        videoTrack.attach(localVideoRef.current);
       }
     } catch (error) {
       setShareError("ไม่สามารถแชร์หน้าจอได้ โปรดลองใหม่อีกครั้ง");
@@ -774,11 +768,12 @@ export default function Classroom() {
   const handleStopShare = () => {
     const lkRoom = liveKitRoomRef.current;
     if (lkRoom) {
-      lkRoom.localParticipant.setScreenShareEnabled(false);
-      const publication = lkRoom.localParticipant.getTrackPublication(Track.Source.ScreenShare);
-      if (publication?.track && localVideoRef.current) {
-        publication.track.detach(localVideoRef.current);
-      }
+      screenTracksRef.current.forEach((track) => {
+        lkRoom.localParticipant.unpublishTrack(track);
+        track.stop?.();
+        track.detach?.();
+      });
+      screenTracksRef.current = [];
     }
     if (localVideoRef.current) {
       localVideoRef.current.srcObject = null;
@@ -1049,24 +1044,12 @@ export default function Classroom() {
 
         <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
           <section className="glass-panel rounded-3xl p-4 md:p-6 soft-shadow">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Video className="h-5 w-5 text-sky-600" />
-                <h2 className="font-display text-xl text-ink-900">Live Video</h2>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="rounded-full border border-ink-900/15 bg-white/70 px-3 py-1 text-xs text-ink-700">
-                  LiveKit: {liveKitStatus}
-                </span>
-                {liveKitStatus !== "connected" && (
-                  <button
-                    type="button"
-                    onClick={handleReconnectLiveKit}
-                    className="rounded-full border border-ink-900/20 bg-white/70 px-3 py-1 text-xs text-ink-700 transition hover:border-ink-900/40"
-                  >
-                    Reconnect
-                  </button>
-                )}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Video className="h-5 w-5 text-sky-600" />
+                  <h2 className="font-display text-xl text-ink-900">Live Video</h2>
+                </div>
+                <div className="flex items-center gap-2">
                 {currentUser?.role === "Student" && (
                   <button
                     type="button"
@@ -1083,24 +1066,6 @@ export default function Classroom() {
               </div>
             </div>
             <div className="relative mt-4 aspect-video w-full overflow-hidden rounded-2xl border bg-gradient-to-br from-white gray-50 to-gray-100">
-              <span className="absolute right-3 top-3 flex items-center gap-1">
-                <span
-                  className={`h-2.5 w-2.5 rounded-full border ${
-                    networkStatus === "offline"
-                      ? "border-rose-300 bg-rose-400"
-                      : saveData || connectionType === "2g"
-                      ? "border-amber-300 bg-amber-400"
-                      : "border-emerald-300 bg-emerald-400"
-                  }`}
-                  title={
-                    networkStatus === "offline"
-                      ? "Network Bad"
-                      : saveData || connectionType === "2g"
-                      ? "Network Fair"
-                      : "Network Good"
-                  }
-                />
-              </span>
               {currentUser?.role === "Teacher" ? (
                 <video
                   ref={localVideoRef}
