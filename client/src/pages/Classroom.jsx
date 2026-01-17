@@ -105,6 +105,7 @@ export default function Classroom({ user }) {
   const [micError, setMicError] = useState("");
   const [micAvailable, setMicAvailable] = useState(true);
   const [micPermission, setMicPermission] = useState("unknown");
+  const [mediaPermission, setMediaPermission] = useState("unknown");
   const [isSpeaking, setIsSpeaking] = useState(false);
   const micStreamRef = useRef(null);
   const [audioStreams, setAudioStreams] = useState([]);
@@ -166,6 +167,31 @@ export default function Classroom({ user }) {
       active = false;
     };
   }, [roomId]);
+
+  useEffect(() => {
+    if (!room || !currentUser || needsJoinProfile) return;
+    if (!navigator.mediaDevices?.getUserMedia) return;
+    navigator.mediaDevices
+      .getUserMedia({ audio: true, video: true })
+      .then((stream) => {
+        stream.getTracks().forEach((track) => track.stop());
+        setMediaPermission("granted");
+      })
+      .catch(() => {
+        setMediaPermission("denied");
+      });
+  }, [room, currentUser, needsJoinProfile]);
+
+  const requestMediaPermissions = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      stream.getTracks().forEach((track) => track.stop());
+      setMediaPermission("granted");
+    } catch (error) {
+      setMediaPermission("denied");
+    }
+  };
 
   useEffect(() => {
     let active = true;
@@ -240,6 +266,7 @@ export default function Classroom({ user }) {
         attachScreenTracks(peer);
         attachMicTracks(peer);
         attachCameraTracks(peer);
+        forceOffer(peer, entry.socketId);
       });
     };
 
@@ -256,6 +283,7 @@ export default function Classroom({ user }) {
       attachScreenTracks(peer);
       attachMicTracks(peer);
       attachCameraTracks(peer);
+      forceOffer(peer, payload.socketId);
     };
 
     const handleChatHistory = (payload) => {
@@ -596,6 +624,18 @@ export default function Classroom({ user }) {
       const sender = peer.addTrack(track, cameraStreamRef.current);
       applySenderParams(sender, "camera");
     });
+  };
+
+  const forceOffer = async (peer, targetId) => {
+    if (!peer) return;
+    const socket = getSocket();
+    try {
+      const offer = await peer.createOffer();
+      await peer.setLocalDescription(offer);
+      socket.emit("webrtc-offer", { targetId, offer, roomId });
+    } catch (error) {
+      // Ignore failed offers.
+    }
   };
 
   const roleBadge = useMemo(() => {
@@ -949,6 +989,18 @@ export default function Classroom({ user }) {
 
   return (
     <main className="min-h-screen overflow-y-auto px-4 py-6 md:px-6">
+      {mediaPermission === "denied" && (
+        <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          กรุณากดเพื่ออนุญาตไมค์/กล้อง
+          <button
+            type="button"
+            onClick={requestMediaPermissions}
+            className="ml-3 rounded-full border border-rose-200 bg-white px-3 py-1 text-xs text-rose-700 transition hover:border-rose-300"
+          >
+            อนุญาต
+          </button>
+        </div>
+      )}
       {needsJoinProfile && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-sky-200/70 backdrop-blur-sm" />
