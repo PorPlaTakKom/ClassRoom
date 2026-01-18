@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@livekit/track-processors": "^0.7.0",
+    "@mediapipe/selfie_segmentation": "^0.1.1675465747",
     "@reduxjs/toolkit": "^2.2.3",
     "@livekit/components-react": "^2.7.0",
     "axios": "^1.7.7",

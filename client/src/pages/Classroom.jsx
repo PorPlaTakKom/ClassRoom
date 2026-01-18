@@ -152,6 +152,7 @@ export default function Classroom() {
   const [cameraError, setCameraError] = useState("");
   const localCameraRef = useRef(null);
   const screenTracksRef = useRef([]);
+  const [cameraMode, setCameraMode] = useState("off");
   const [needsJoinProfile, setNeedsJoinProfile] = useState(false);
   const [joinName, setJoinName] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
@@ -160,7 +161,7 @@ export default function Classroom() {
   const previewVideoRef = useRef(null);
   const [blurEnabled, setBlurEnabled] = useState(false);
   const [cameraPromptError, setCameraPromptError] = useState("");
-  const blurProcessorRef = useRef(null);
+  const cameraPipelineRef = useRef(null);
 
   useEffect(() => {
     let active = true;
@@ -236,55 +237,112 @@ export default function Classroom() {
     setPreviewStream(null);
   };
 
-  const createBlurProcessor = async () => {
-    const module = await import("@livekit/track-processors");
-    const candidates = [
-      module.createBackgroundBlur,
-      module.BackgroundBlur,
-      module.backgroundBlur,
-      module.default?.createBackgroundBlur,
-      module.default?.BackgroundBlur
-    ].filter(Boolean);
-    if (candidates.length === 0) {
-      throw new Error("Background blur processor not available");
+  const loadSelfieSegmentation = async () => {
+    const module = await import("@mediapipe/selfie_segmentation");
+    const SelfieSegmentation =
+      module.SelfieSegmentation || module.default?.SelfieSegmentation;
+    if (!SelfieSegmentation) {
+      throw new Error("SelfieSegmentation not available");
     }
-    const factory = candidates[0];
-    const attempt = async (fn) => {
-      try {
-        return await fn({ blurRadius: 12 });
-      } catch (error) {
-        return await fn(12);
-      }
-    };
-    if (typeof factory === "function") {
-      try {
-        const processor = await attempt(factory);
-        if (processor?.init) return processor;
-      } catch (error) {
-        try {
-          const processor = new factory({ blurRadius: 12 });
-          if (processor?.init) return processor;
-        } catch (innerError) {
-          // fallback below
-        }
-      }
-    }
-    throw new Error("Background blur processor not supported");
+    return SelfieSegmentation;
   };
 
-  const applyCameraBlur = async (enabled) => {
-    const lkRoom = liveKitRoomRef.current;
-    const publication = lkRoom?.localParticipant.getTrackPublication(Track.Source.Camera);
-    const localTrack = publication?.track;
-    if (!localTrack || typeof localTrack.setProcessor !== "function") return;
-    if (enabled) {
-      const processor = await createBlurProcessor();
-      blurProcessorRef.current = processor;
-      await localTrack.setProcessor(processor);
-    } else if (localTrack.stopProcessor) {
-      await localTrack.stopProcessor();
-      blurProcessorRef.current = null;
+  const createBlurPipeline = async (stream) => {
+    const video = document.createElement("video");
+    video.autoplay = true;
+    video.muted = true;
+    video.playsInline = true;
+    video.srcObject = stream;
+    await video.play().catch(() => {});
+
+    const canvas = document.createElement("canvas");
+    const tempCanvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    const tempCtx = tempCanvas.getContext("2d");
+    if (!ctx || !tempCtx) {
+      throw new Error("Canvas context not available");
     }
+
+    const resize = () => {
+      const width = video.videoWidth || 1280;
+      const height = video.videoHeight || 720;
+      canvas.width = width;
+      canvas.height = height;
+      tempCanvas.width = width;
+      tempCanvas.height = height;
+    };
+    resize();
+
+    const SelfieSegmentation = await loadSelfieSegmentation();
+    const segmenter = new SelfieSegmentation({
+      locateFile: (file) =>
+        `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`
+    });
+    segmenter.setOptions({ modelSelection: 1 });
+
+    const state = {
+      rafId: null
+    };
+
+    segmenter.onResults((results) => {
+      if (!results?.image || !results?.segmentationMask) return;
+      if (
+        canvas.width !== results.image.width ||
+        canvas.height !== results.image.height
+      ) {
+        canvas.width = results.image.width;
+        canvas.height = results.image.height;
+        tempCanvas.width = results.image.width;
+        tempCanvas.height = results.image.height;
+      }
+
+      tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
+      tempCtx.drawImage(
+        results.segmentationMask,
+        0,
+        0,
+        tempCanvas.width,
+        tempCanvas.height
+      );
+      tempCtx.globalCompositeOperation = "source-in";
+      tempCtx.drawImage(results.image, 0, 0, tempCanvas.width, tempCanvas.height);
+      tempCtx.globalCompositeOperation = "source-over";
+
+      ctx.save();
+      ctx.filter = "blur(12px)";
+      ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+      ctx.restore();
+      ctx.drawImage(tempCanvas, 0, 0, canvas.width, canvas.height);
+    });
+
+    const processFrame = async () => {
+      await segmenter.send({ image: video });
+      state.rafId = requestAnimationFrame(processFrame);
+    };
+    state.rafId = requestAnimationFrame(processFrame);
+
+    const processedStream = canvas.captureStream(24);
+
+    const stop = () => {
+      if (state.rafId) cancelAnimationFrame(state.rafId);
+      segmenter.close?.();
+      video.srcObject = null;
+      processedStream.getTracks().forEach((track) => track.stop());
+    };
+
+    return { processedStream, stop };
+  };
+
+  const stopCameraPipeline = async () => {
+    const lkRoom = liveKitRoomRef.current;
+    if (cameraPipelineRef.current?.track && lkRoom) {
+      await lkRoom.localParticipant.unpublishTrack(cameraPipelineRef.current.track);
+    }
+    cameraPipelineRef.current?.originalStream
+      ?.getTracks()
+      .forEach((track) => track.stop());
+    cameraPipelineRef.current?.stop?.();
+    cameraPipelineRef.current = null;
   };
 
   const openCameraPreview = async () => {
@@ -413,6 +471,8 @@ export default function Classroom() {
       setHasRemoteStream(false);
       stopPreviewStream();
       setShowCameraPreview(false);
+      stopCameraPipeline();
+      setCameraMode("off");
       liveKitRoomRef.current?.disconnect();
       liveKitRoomRef.current = null;
       setLiveKitRoom(null);
@@ -618,17 +678,13 @@ export default function Classroom() {
   useEffect(() => {
     const lkRoom = liveKitRoomRef.current;
     if (!lkRoom || !localCameraRef.current) return;
+    if (cameraMode === "processed") return;
     const publication = lkRoom.localParticipant.getTrackPublication(Track.Source.Camera);
     if (!cameraEnabled || !publication?.track) return;
     const track = publication.track;
     track.attach(localCameraRef.current);
     return () => track.detach?.(localCameraRef.current);
-  }, [cameraEnabled]);
-
-  useEffect(() => {
-    if (!cameraEnabled) return;
-    applyCameraBlur(blurEnabled).catch(() => {});
-  }, [cameraEnabled, blurEnabled]);
+  }, [cameraEnabled, cameraMode]);
 
   useEffect(() => {
     const lkRoom = liveKitRoomRef.current;
@@ -785,6 +841,44 @@ export default function Classroom() {
     setIsSharing(false);
   };
 
+  const startBlurCamera = async () => {
+    const lkRoom = liveKitRoomRef.current;
+    if (!lkRoom) {
+      setCameraError("Live session ยังไม่พร้อม");
+      return;
+    }
+    await stopCameraPipeline();
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        width: 1280,
+        height: 720,
+        frameRate: 24
+      },
+      audio: false
+    });
+    const { processedStream, stop } = await createBlurPipeline(stream);
+    const track = processedStream.getVideoTracks()[0];
+    if (!track) {
+      stop();
+      stream.getTracks().forEach((trackItem) => trackItem.stop());
+      throw new Error("Processed video track not available");
+    }
+    await lkRoom.localParticipant.publishTrack(track, {
+      source: Track.Source.Camera
+    });
+    cameraPipelineRef.current = {
+      track,
+      stop,
+      originalStream: stream,
+      processedStream
+    };
+    if (localCameraRef.current) {
+      localCameraRef.current.srcObject = processedStream;
+    }
+    setCameraEnabled(true);
+    setCameraMode("processed");
+  };
+
   const handleStartCamera = async () => {
     setCameraError("");
     try {
@@ -797,19 +891,17 @@ export default function Classroom() {
         setCameraError("Live session ยังไม่พร้อม");
         return;
       }
+      if (blurEnabled) {
+        await startBlurCamera();
+        return;
+      }
       await lkRoom.localParticipant.setCameraEnabled(true, {
         width: 1280,
         height: 720,
         frameRate: 24
       });
       setCameraEnabled(true);
-      if (blurEnabled) {
-        try {
-          await applyCameraBlur(true);
-        } catch (error) {
-          setCameraError("เปิดกล้องได้ แต่เบลอพื้นหลังไม่สำเร็จ");
-        }
-      }
+      setCameraMode("native");
       const publication = lkRoom.localParticipant.getTrackPublication(Track.Source.Camera);
       if (publication?.track && localCameraRef.current) {
         publication.track.attach(localCameraRef.current);
@@ -823,19 +915,21 @@ export default function Classroom() {
 
   const handleStopCamera = () => {
     const lkRoom = liveKitRoomRef.current;
+    if (cameraMode === "processed") {
+      stopCameraPipeline();
+    }
     if (lkRoom) {
       lkRoom.localParticipant.setCameraEnabled(false);
       const publication = lkRoom.localParticipant.getTrackPublication(Track.Source.Camera);
       if (publication?.track && localCameraRef.current) {
         publication.track.detach(localCameraRef.current);
       }
-      publication?.track?.stopProcessor?.();
-      blurProcessorRef.current = null;
     }
     if (localCameraRef.current) {
       localCameraRef.current.srcObject = null;
     }
     setCameraEnabled(false);
+    setCameraMode("off");
     setCameraError("");
   };
 
