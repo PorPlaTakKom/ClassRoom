@@ -256,10 +256,8 @@ export default function Classroom() {
     await video.play().catch(() => {});
 
     const canvas = document.createElement("canvas");
-    const tempCanvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d");
-    const tempCtx = tempCanvas.getContext("2d");
-    if (!ctx || !tempCtx) {
+    if (!ctx) {
       throw new Error("Canvas context not available");
     }
 
@@ -268,8 +266,6 @@ export default function Classroom() {
       const height = video.videoHeight || 720;
       canvas.width = width;
       canvas.height = height;
-      tempCanvas.width = width;
-      tempCanvas.height = height;
     };
     resize();
 
@@ -292,27 +288,21 @@ export default function Classroom() {
       ) {
         canvas.width = results.image.width;
         canvas.height = results.image.height;
-        tempCanvas.width = results.image.width;
-        tempCanvas.height = results.image.height;
       }
 
-      tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
-      tempCtx.drawImage(
-        results.segmentationMask,
-        0,
-        0,
-        tempCanvas.width,
-        tempCanvas.height
-      );
-      tempCtx.globalCompositeOperation = "source-in";
-      tempCtx.drawImage(results.image, 0, 0, tempCanvas.width, tempCanvas.height);
-      tempCtx.globalCompositeOperation = "source-over";
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      ctx.save();
+      // Foreground (person)
+      ctx.drawImage(results.segmentationMask, 0, 0, canvas.width, canvas.height);
+      ctx.globalCompositeOperation = "source-in";
+      ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+
+      // Background (blurred)
+      ctx.globalCompositeOperation = "destination-over";
       ctx.filter = "blur(12px)";
       ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
-      ctx.restore();
-      ctx.drawImage(tempCanvas, 0, 0, canvas.width, canvas.height);
+      ctx.filter = "none";
+      ctx.globalCompositeOperation = "source-over";
     });
 
     const processFrame = async () => {
