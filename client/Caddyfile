@@ -6,8 +6,8 @@
 
   encode gzip
 
-  # LiveKit signaling + WebSocket
-  @livekit path /rtc /rtc/* /twirp/*
+  # LiveKit signaling + WebSocket + metrics
+  @livekit path /rtc /rtc/* /twirp/* /livekit-metrics
   handle @livekit {
     reverse_proxy livekit:7880
   }

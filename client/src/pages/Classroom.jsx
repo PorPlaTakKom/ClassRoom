@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Camera,
@@ -12,7 +12,13 @@ import {
   Users2,
   Video
 } from "lucide-react";
-import { Room, RoomEvent, Track, TrackEvent, createLocalScreenTracks } from "livekit-client";
+import { Room, RoomEvent, Track, createLocalScreenTracks } from "livekit-client";
+import {
+  RoomAudioRenderer,
+  RoomContext,
+  VideoTrack,
+  useTracks
+} from "@livekit/components-react";
 import {
   deleteRoomFile,
   fetchLivekitToken,
@@ -25,45 +31,79 @@ import { getSocket } from "../lib/socket.js";
 import { useDispatch, useSelector } from "react-redux";
 import { setUser } from "../store/authSlice.js";
 
-const RemoteVideo = memo(function RemoteVideo({ track, className, videoRef: externalRef }) {
-  const internalRef = useRef(null);
-  const videoRef = externalRef || internalRef;
-
-  useEffect(() => {
-    if (!videoRef.current) return;
-    const currentTrack = track;
-    if (currentTrack?.attach) {
-      currentTrack.attach(videoRef.current);
-      return () => currentTrack.detach?.(videoRef.current);
-    }
-    videoRef.current.srcObject = null;
-    return undefined;
-  }, [track]);
-
-  return <video ref={videoRef} className={className} autoPlay muted playsInline />;
-});
-
 const getParticipantName = (participant) =>
   participant?.name || participant?.identity || "";
 
 const normalizeName = (name) => (name ? name.trim().toLowerCase() : "");
 
-function AudioPlayer({ track }) {
-  const audioRef = useRef(null);
+const getTrackSource = (trackRef) =>
+  trackRef?.source ?? trackRef?.publication?.source;
+
+const isTeacherTrack = (trackRef) =>
+  trackRef?.participant?.metadata === "Teacher";
+
+const isStudentTrack = (trackRef) =>
+  trackRef?.participant?.metadata === "Student";
+
+const getTrackKey = (trackRef) => {
+  const participantId = trackRef?.participant?.sid || "participant";
+  const trackId =
+    trackRef?.publication?.trackSid ||
+    trackRef?.publication?.sid ||
+    getTrackSource(trackRef) ||
+    "track";
+  return `${participantId}-${trackId}`;
+};
+
+function LiveKitTeacherStream({ onStreamChange, className }) {
+  const tracks = useTracks([Track.Source.ScreenShare, Track.Source.Camera], {
+    onlySubscribed: true
+  });
+  const teacherTracks = tracks.filter(isTeacherTrack);
+  const screenTrack = teacherTracks.find(
+    (track) => getTrackSource(track) === Track.Source.ScreenShare
+  );
+  const cameraTrack = teacherTracks.find(
+    (track) => getTrackSource(track) === Track.Source.Camera
+  );
+  const activeTrack = screenTrack || cameraTrack;
 
   useEffect(() => {
-    if (audioRef.current) {
-      const currentTrack = track;
-      if (currentTrack?.attach) {
-        currentTrack.attach(audioRef.current);
-        audioRef.current.play?.().catch(() => {});
-        return () => currentTrack.detach?.(audioRef.current);
-      }
-    }
-    return undefined;
-  }, [track]);
+    onStreamChange?.(Boolean(activeTrack));
+  }, [activeTrack, onStreamChange]);
 
-  return <audio ref={audioRef} autoPlay />;
+  if (!activeTrack) return null;
+
+  return <VideoTrack trackRef={activeTrack} className={className} />;
+}
+
+function LiveKitStudentCameraSection() {
+  const tracks = useTracks([Track.Source.Camera], { onlySubscribed: true });
+  const studentTracks = tracks.filter(
+    (track) =>
+      isStudentTrack(track) && getTrackSource(track) === Track.Source.Camera
+  );
+
+  if (studentTracks.length === 0) return null;
+
+  return (
+    <div className="mt-4 rounded-2xl border border-ink-900/10 bg-white/70 p-4">
+      <p className="text-xs font-semibold text-ink-600">กล้องนักเรียน</p>
+      <div className="mt-3 grid grid-cols-2 gap-3">
+        {studentTracks.map((trackRef) => (
+          <div key={getTrackKey(trackRef)} className="relative">
+            <VideoTrack
+              trackRef={trackRef}
+              className="h-24 w-full rounded-xl object-cover"
+            />
+            <span className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-black/50 px-2 py-0.5 text-[10px] text-white">
+              {getParticipantName(trackRef.participant) || "Student"}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export default function Classroom() {
@@ -74,8 +114,9 @@ export default function Classroom() {
   const dispatch = useDispatch();
   const storedUser = useSelector((state) => state.auth.user);
   const localVideoRef = useRef(null);
-  const remoteVideoRef = useRef(null);
   const liveKitRoomRef = useRef(null);
+  const liveVideoContainerRef = useRef(null);
+  const [liveKitRoom, setLiveKitRoom] = useState(null);
   const [room, setRoom] = useState(null);
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState(storedUser);
@@ -103,16 +144,11 @@ export default function Classroom() {
   const [needsMediaAccess, setNeedsMediaAccess] = useState(false);
   const [speakingMap, setSpeakingMap] = useState({});
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [audioTracks, setAudioTracks] = useState([]);
-  const [teacherVideoTrack, setTeacherVideoTrack] = useState(null);
-  const [teacherCameraTrack, setTeacherCameraTrack] = useState(null);
-  const [teacherScreenTrack, setTeacherScreenTrack] = useState(null);
   const chatEndRef = useRef(null);
   const [cameraEnabled, setCameraEnabled] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const localCameraRef = useRef(null);
   const screenTracksRef = useRef([]);
-  const [remoteVideoStreams, setRemoteVideoStreams] = useState([]);
   const [needsJoinProfile, setNeedsJoinProfile] = useState(false);
   const [joinName, setJoinName] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
@@ -262,19 +298,13 @@ export default function Classroom() {
     const handleClassClosed = () => {
       setClassClosed(true);
       setApproved(false);
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = null;
-      }
-      setAudioTracks([]);
-      setRemoteVideoStreams([]);
-      setTeacherVideoTrack(null);
-      setTeacherCameraTrack(null);
-      setTeacherScreenTrack(null);
       setSpeakingMap({});
       setMicEnabled(false);
       setCameraEnabled(false);
+      setHasRemoteStream(false);
       liveKitRoomRef.current?.disconnect();
       liveKitRoomRef.current = null;
+      setLiveKitRoom(null);
     };
 
     socket.on("connect", handleConnect);
@@ -394,128 +424,7 @@ export default function Classroom() {
           adaptiveStream: true,
           dynacast: true
         });
-
-        const setTeacherTrack = (publication, track) => {
-          if (publication.source === Track.Source.ScreenShare) {
-            setTeacherScreenTrack(track);
-          } else if (publication.source === Track.Source.Camera) {
-            setTeacherCameraTrack(track);
-          }
-        };
-
-        const clearTeacherTrack = (publication) => {
-          if (publication.source === Track.Source.ScreenShare) {
-            setTeacherScreenTrack(null);
-          } else if (publication.source === Track.Source.Camera) {
-            setTeacherCameraTrack(null);
-          }
-        };
-
-        const removeStudentTrack = (participantSid, trackSid) => {
-          setRemoteVideoStreams((prev) =>
-            prev.filter((item) => item.id !== `${participantSid}-${trackSid}`)
-          );
-        };
-
-        const addStudentTrack = (participant, track) => {
-          setRemoteVideoStreams((prev) => {
-            const key = `${participant.sid}-${track.sid}`;
-            if (prev.some((item) => item.id === key)) return prev;
-            return [...prev, { id: key, track, name: getParticipantName(participant) }];
-          });
-        };
-
-        lkRoom.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
-          const role = participant?.metadata || "";
-          if (track.kind === Track.Kind.Audio) {
-            setAudioTracks((prev) => {
-              if (prev.some((item) => item.id === track.sid)) return prev;
-              return [...prev, { id: track.sid, track }];
-            });
-            return;
-          }
-          if (track.kind === Track.Kind.Video) {
-            if (role === "Teacher") {
-              setTeacherTrack(publication, track);
-              track.on(TrackEvent.Muted, () => clearTeacherTrack(publication));
-              track.on(TrackEvent.Unmuted, () => setTeacherTrack(publication, track));
-              track.on(TrackEvent.Ended, () => clearTeacherTrack(publication));
-            } else if (currentUser.role === "Teacher" && role === "Student") {
-              addStudentTrack(participant, track);
-              track.on(TrackEvent.Muted, () => removeStudentTrack(participant.sid, track.sid));
-              track.on(TrackEvent.Unmuted, () => addStudentTrack(participant, track));
-            }
-          }
-        });
-
-        lkRoom.on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
-          const role = participant?.metadata || "";
-          if (track.kind === Track.Kind.Audio) {
-            setAudioTracks((prev) => prev.filter((item) => item.id !== track.sid));
-            return;
-          }
-          if (track.kind === Track.Kind.Video) {
-            if (role === "Teacher") {
-              clearTeacherTrack(publication);
-            } else if (currentUser.role === "Teacher" && role === "Student") {
-              removeStudentTrack(participant.sid, track.sid);
-            }
-          }
-        });
-
-        lkRoom.on(RoomEvent.TrackUnpublished, (publication, participant) => {
-          const role = participant?.metadata || "";
-          if (publication.kind === Track.Kind.Audio) {
-            setAudioTracks((prev) => prev.filter((item) => item.id !== publication.trackSid));
-            return;
-          }
-          if (publication.kind === Track.Kind.Video) {
-            if (role === "Teacher") {
-              clearTeacherTrack(publication);
-            } else if (currentUser.role === "Teacher" && role === "Student") {
-              setRemoteVideoStreams((prev) =>
-                prev.filter((item) => !item.id.startsWith(`${participant.sid}-`))
-              );
-            }
-          }
-        });
-
-        lkRoom.on(RoomEvent.TrackMuted, (publication, participant) => {
-          if (participant?.metadata !== "Teacher") return;
-          clearTeacherTrack(publication);
-        });
-
-        lkRoom.on(RoomEvent.TrackUnmuted, (publication, participant) => {
-          if (participant?.metadata !== "Teacher") return;
-          if (publication.track) {
-            setTeacherTrack(publication, publication.track);
-          }
-        });
-
-        lkRoom.on(RoomEvent.TrackMuted, (publication, participant) => {
-          const role = participant?.metadata || "";
-          if (publication.source !== Track.Source.Camera) return;
-          if (currentUser.role === "Teacher" && role === "Student") {
-            setRemoteVideoStreams((prev) =>
-              prev.filter((item) => !item.id.startsWith(`${participant.sid}-`))
-            );
-          }
-        });
-
-        lkRoom.on(RoomEvent.TrackUnmuted, (publication, participant) => {
-          const role = participant?.metadata || "";
-          if (publication.source !== Track.Source.Camera) return;
-          if (currentUser.role === "Teacher" && role === "Student" && publication.track) {
-            setRemoteVideoStreams((prev) => {
-              const key = `${participant.sid}-${publication.track.sid}`;
-              if (prev.some((item) => item.id === key)) return prev;
-              return [
-                ...prev,
-                { id: key, track: publication.track, name: getParticipantName(participant) }
-              ];
-            });
-          }
-        });
+        setLiveKitRoom(lkRoom);
 
         lkRoom.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
           const next = {};
@@ -574,10 +483,7 @@ export default function Classroom() {
         });
 
         lkRoom.on(RoomEvent.Disconnected, () => {
-          setAudioTracks([]);
-          setRemoteVideoStreams([]);
-          setTeacherCameraTrack(null);
-          setTeacherScreenTrack(null);
+          setLiveKitRoom(null);
         });
 
         await lkRoom.connect(data.url, token);
@@ -597,21 +503,6 @@ export default function Classroom() {
       active = false;
     };
   }, [room, roomId, currentUser, approved]);
-
-  useEffect(() => {
-    if (teacherScreenTrack) {
-      setTeacherVideoTrack(teacherScreenTrack);
-      setHasRemoteStream(true);
-      return;
-    }
-    if (teacherCameraTrack) {
-      setTeacherVideoTrack(teacherCameraTrack);
-      setHasRemoteStream(true);
-      return;
-    }
-    setTeacherVideoTrack(null);
-    setHasRemoteStream(false);
-  }, [teacherScreenTrack, teacherCameraTrack]);
 
   useEffect(() => {
     const lkRoom = liveKitRoomRef.current;
@@ -859,27 +750,24 @@ export default function Classroom() {
   };
 
   const handleFullscreen = async () => {
-    const videoEl = remoteVideoRef.current;
+    const containerEl = liveVideoContainerRef.current;
     if (document.fullscreenElement) {
       await document.exitFullscreen();
       return;
     }
-    if (videoEl?.requestFullscreen) {
-      await videoEl.requestFullscreen();
+    if (containerEl?.requestFullscreen) {
+      await containerEl.requestFullscreen();
       return;
     }
-    if (videoEl?.webkitEnterFullscreen) {
-      videoEl.webkitEnterFullscreen();
+    if (containerEl?.webkitEnterFullscreen) {
+      containerEl.webkitEnterFullscreen();
     }
   };
 
   const handleRefreshLive = () => {
     liveKitRoomRef.current?.disconnect();
     liveKitRoomRef.current = null;
-    setRemoteVideoStreams([]);
-    setTeacherCameraTrack(null);
-    setTeacherScreenTrack(null);
-    setAudioTracks([]);
+    setLiveKitRoom(null);
     setHasRemoteStream(false);
     if (currentUser?.role === "Student") {
       setApproved(false);
@@ -933,7 +821,7 @@ export default function Classroom() {
     );
   }
 
-  return (
+  const content = (
     <main className="min-h-screen overflow-y-auto px-4 py-6 md:px-6">
       {currentUser?.role === "Student" && needsMediaAccess && (
         <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -1047,22 +935,25 @@ export default function Classroom() {
                   <h2 className="font-display text-xl text-ink-900">Live Video</h2>
                 </div>
                 <div className="flex items-center gap-2">
-                {currentUser?.role === "Student" && (
-                  <button
-                    type="button"
-                    onClick={handleFullscreen}
-                    className="inline-flex items-center gap-1 rounded-full border border-ink-900/20 bg-white/70 px-3 py-1 text-xs text-ink-700 transition hover:border-ink-900/40"
-                  >
-                    <Maximize2 className="h-3 w-3" />
-                    {isFullscreen ? "ย่อหน้าจอ" : "เต็มจอ"}
-                  </button>
-                )}
-                <span className="rounded-full bg-sky-200/60 px-3 py-1 text-xs text-sky-700">
-                  ถ่ายทอดสด
-                </span>
+                  {currentUser?.role === "Student" && (
+                    <button
+                      type="button"
+                      onClick={handleFullscreen}
+                      className="inline-flex items-center gap-1 rounded-full border border-ink-900/20 bg-white/70 px-3 py-1 text-xs text-ink-700 transition hover:border-ink-900/40"
+                    >
+                      <Maximize2 className="h-3 w-3" />
+                      {isFullscreen ? "ย่อหน้าจอ" : "เต็มจอ"}
+                    </button>
+                  )}
+                  <span className="rounded-full bg-sky-200/60 px-3 py-1 text-xs text-sky-700">
+                    ถ่ายทอดสด
+                  </span>
+                </div>
               </div>
-            </div>
-            <div className="relative mt-4 aspect-video w-full overflow-hidden rounded-2xl border bg-gradient-to-br from-white gray-50 to-gray-100">
+            <div
+              ref={liveVideoContainerRef}
+              className="relative mt-4 aspect-video w-full overflow-hidden rounded-2xl border bg-gradient-to-br from-white gray-50 to-gray-100"
+            >
               {currentUser?.role === "Teacher" ? (
                 <video
                   ref={localVideoRef}
@@ -1072,11 +963,12 @@ export default function Classroom() {
                   playsInline
                 />
               ) : (
-                <RemoteVideo
-                  track={teacherVideoTrack}
-                  className="h-full w-full object-cover"
-                  videoRef={remoteVideoRef}
-                />
+                liveKitRoom && (
+                  <LiveKitTeacherStream
+                    onStreamChange={setHasRemoteStream}
+                    className="h-full w-full object-cover"
+                  />
+                )
               )}
               {cameraEnabled && (
                 <div className="absolute bottom-3 right-3 h-28 w-40 overflow-hidden rounded-xl border border-white/40 bg-ink-900/5 shadow-sm">
@@ -1216,9 +1108,7 @@ export default function Classroom() {
           </section>
 
           <aside className="glass-panel flex h-[640px] flex-col rounded-3xl p-4 md:h-[680px] md:p-6 soft-shadow">
-            {audioTracks.map((item) => (
-              <AudioPlayer key={item.id} track={item.track} />
-            ))}
+            {liveKitRoom && <RoomAudioRenderer />}
             {currentUser?.role === "Student" && (
               <div className="rounded-2xl border border-ink-900/10 bg-white/70 p-3 text-sm text-ink-700">
                 ครูผู้สอน: <span className="font-semibold text-ink-900">{room.teacherName}</span>
@@ -1303,23 +1193,8 @@ export default function Classroom() {
               </div>
             )}
 
-            {currentUser?.role === "Teacher" && remoteVideoStreams.length > 0 && (
-              <div className="mt-4 rounded-2xl border border-ink-900/10 bg-white/70 p-4">
-                <p className="text-xs font-semibold text-ink-600">กล้องนักเรียน</p>
-                <div className="mt-3 grid grid-cols-2 gap-3">
-                  {remoteVideoStreams.map((item) => (
-                    <div key={item.id} className="relative">
-                      <RemoteVideo
-                        className="h-24 w-full rounded-xl object-cover"
-                        track={item.track}
-                      />
-                      <span className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-black/50 px-2 py-0.5 text-[10px] text-white">
-                        {item.name || "Student"}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
+            {currentUser?.role === "Teacher" && liveKitRoom && (
+              <LiveKitStudentCameraSection />
             )}
             <div className="mt-4 flex-1 space-y-3 overflow-y-auto pr-2">
               {messages.length === 0 ? (
@@ -1364,5 +1239,11 @@ export default function Classroom() {
         </div>
       </div>
     </main>
+  );
+
+  return liveKitRoom ? (
+    <RoomContext.Provider value={liveKitRoom}>{content}</RoomContext.Provider>
+  ) : (
+    content
   );
 }
