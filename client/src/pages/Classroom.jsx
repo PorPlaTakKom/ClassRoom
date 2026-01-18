@@ -260,6 +260,15 @@ export default function Classroom() {
     video.playsInline = true;
     video.srcObject = stream;
     await video.play().catch(() => {});
+    if (video.readyState < 2) {
+      await new Promise((resolve) => {
+        const onReady = () => {
+          video.removeEventListener("loadedmetadata", onReady);
+          resolve();
+        };
+        video.addEventListener("loadedmetadata", onReady);
+      });
+    }
 
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d");
@@ -287,7 +296,7 @@ export default function Classroom() {
     };
 
     segmenter.onResults((results) => {
-      if (!results?.image || !results?.segmentationMask) return;
+      if (!results?.image) return;
       if (
         canvas.width !== results.image.width ||
         canvas.height !== results.image.height
@@ -298,21 +307,31 @@ export default function Classroom() {
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Foreground (person)
-      ctx.drawImage(results.segmentationMask, 0, 0, canvas.width, canvas.height);
-      ctx.globalCompositeOperation = "source-in";
-      ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+      if (results.segmentationMask) {
+        // Foreground (person)
+        ctx.drawImage(results.segmentationMask, 0, 0, canvas.width, canvas.height);
+        ctx.globalCompositeOperation = "source-in";
+        ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
-      // Background (blurred)
-      ctx.globalCompositeOperation = "destination-over";
-      ctx.filter = "blur(12px)";
-      ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
-      ctx.filter = "none";
+        // Background (blurred)
+        ctx.globalCompositeOperation = "destination-over";
+        ctx.filter = "blur(12px)";
+        ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+        ctx.filter = "none";
+      } else {
+        ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+      }
       ctx.globalCompositeOperation = "source-over";
     });
 
     const processFrame = async () => {
-      await segmenter.send({ image: video });
+      if (video.readyState >= 2) {
+        try {
+          await segmenter.send({ image: video });
+        } catch (error) {
+          // keep retrying on next frame
+        }
+      }
       state.rafId = requestAnimationFrame(processFrame);
     };
     state.rafId = requestAnimationFrame(processFrame);
@@ -867,6 +886,10 @@ export default function Classroom() {
     if (!lkRoom) {
       setCameraError("Live session ยังไม่พร้อม");
       return;
+    }
+    const existing = lkRoom.localParticipant.getTrackPublication(Track.Source.Camera);
+    if (existing?.track) {
+      await lkRoom.localParticipant.unpublishTrack(existing.track);
     }
     await stopCameraPipeline();
     const stream = await navigator.mediaDevices.getUserMedia({
