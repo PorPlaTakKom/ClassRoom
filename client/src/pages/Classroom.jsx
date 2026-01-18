@@ -155,6 +155,12 @@ export default function Classroom() {
   const [needsJoinProfile, setNeedsJoinProfile] = useState(false);
   const [joinName, setJoinName] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
+  const [showCameraPreview, setShowCameraPreview] = useState(false);
+  const [previewStream, setPreviewStream] = useState(null);
+  const previewVideoRef = useRef(null);
+  const [blurEnabled, setBlurEnabled] = useState(false);
+  const [cameraPromptError, setCameraPromptError] = useState("");
+  const blurProcessorRef = useRef(null);
 
   useEffect(() => {
     let active = true;
@@ -213,6 +219,106 @@ export default function Classroom() {
     } catch (error) {
       setNeedsMediaAccess(true);
     }
+  };
+
+  useEffect(() => {
+    if (!previewVideoRef.current) return;
+    previewVideoRef.current.srcObject = previewStream;
+    return () => {
+      if (previewVideoRef.current) {
+        previewVideoRef.current.srcObject = null;
+      }
+    };
+  }, [previewStream]);
+
+  const stopPreviewStream = () => {
+    previewStream?.getTracks().forEach((track) => track.stop());
+    setPreviewStream(null);
+  };
+
+  const createBlurProcessor = async () => {
+    const module = await import("@livekit/track-processors");
+    const candidates = [
+      module.createBackgroundBlur,
+      module.BackgroundBlur,
+      module.backgroundBlur,
+      module.default?.createBackgroundBlur,
+      module.default?.BackgroundBlur
+    ].filter(Boolean);
+    if (candidates.length === 0) {
+      throw new Error("Background blur processor not available");
+    }
+    const factory = candidates[0];
+    const attempt = async (fn) => {
+      try {
+        return await fn({ blurRadius: 12 });
+      } catch (error) {
+        return await fn(12);
+      }
+    };
+    if (typeof factory === "function") {
+      try {
+        const processor = await attempt(factory);
+        if (processor?.init) return processor;
+      } catch (error) {
+        try {
+          const processor = new factory({ blurRadius: 12 });
+          if (processor?.init) return processor;
+        } catch (innerError) {
+          // fallback below
+        }
+      }
+    }
+    throw new Error("Background blur processor not supported");
+  };
+
+  const applyCameraBlur = async (enabled) => {
+    const lkRoom = liveKitRoomRef.current;
+    const publication = lkRoom?.localParticipant.getTrackPublication(Track.Source.Camera);
+    const localTrack = publication?.track;
+    if (!localTrack || typeof localTrack.setProcessor !== "function") return;
+    if (enabled) {
+      const processor = await createBlurProcessor();
+      blurProcessorRef.current = processor;
+      await localTrack.setProcessor(processor);
+    } else if (localTrack.stopProcessor) {
+      await localTrack.stopProcessor();
+      blurProcessorRef.current = null;
+    }
+  };
+
+  const openCameraPreview = async () => {
+    setCameraPromptError("");
+    if (currentUser?.role === "Teacher" && isSharing) {
+      setCameraPromptError("กรุณาหยุดแชร์หน้าจอก่อนเปิดกล้อง");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: 1280,
+          height: 720,
+          frameRate: 24
+        },
+        audio: false
+      });
+      setPreviewStream(stream);
+      setShowCameraPreview(true);
+    } catch (error) {
+      const name = error?.name || "UnknownError";
+      setCameraPromptError(`ไม่สามารถเปิดพรีวิวกล้องได้: ${name}`);
+    }
+  };
+
+  const handleConfirmCamera = async () => {
+    stopPreviewStream();
+    setShowCameraPreview(false);
+    await handleStartCamera();
+  };
+
+  const handleCancelCamera = () => {
+    stopPreviewStream();
+    setShowCameraPreview(false);
   };
 
   useEffect(() => {
@@ -305,6 +411,8 @@ export default function Classroom() {
       setMicEnabled(false);
       setCameraEnabled(false);
       setHasRemoteStream(false);
+      stopPreviewStream();
+      setShowCameraPreview(false);
       liveKitRoomRef.current?.disconnect();
       liveKitRoomRef.current = null;
       setLiveKitRoom(null);
@@ -518,6 +626,11 @@ export default function Classroom() {
   }, [cameraEnabled]);
 
   useEffect(() => {
+    if (!cameraEnabled) return;
+    applyCameraBlur(blurEnabled).catch(() => {});
+  }, [cameraEnabled, blurEnabled]);
+
+  useEffect(() => {
     const lkRoom = liveKitRoomRef.current;
     if (!lkRoom || !localVideoRef.current) return;
     const publication = lkRoom.localParticipant.getTrackPublication(Track.Source.ScreenShare);
@@ -690,6 +803,13 @@ export default function Classroom() {
         frameRate: 24
       });
       setCameraEnabled(true);
+      if (blurEnabled) {
+        try {
+          await applyCameraBlur(true);
+        } catch (error) {
+          setCameraError("เปิดกล้องได้ แต่เบลอพื้นหลังไม่สำเร็จ");
+        }
+      }
       const publication = lkRoom.localParticipant.getTrackPublication(Track.Source.Camera);
       if (publication?.track && localCameraRef.current) {
         publication.track.attach(localCameraRef.current);
@@ -709,6 +829,8 @@ export default function Classroom() {
       if (publication?.track && localCameraRef.current) {
         publication.track.detach(localCameraRef.current);
       }
+      publication?.track?.stopProcessor?.();
+      blurProcessorRef.current = null;
     }
     if (localCameraRef.current) {
       localCameraRef.current.srcObject = null;
@@ -841,6 +963,60 @@ export default function Classroom() {
                 className="rounded-full bg-sky-500 px-4 py-2 text-xs font-semibold text-white transition hover:bg-sky-400"
               >
                 อนุญาต
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showCameraPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-sky-200/70 backdrop-blur-sm" />
+          <div className="relative z-10 w-full max-w-lg rounded-3xl border border-ink-900/20 bg-white/90 p-6 text-ink-700 soft-shadow">
+            <h2 className="font-display text-xl text-ink-900">พรีวิวกล้อง</h2>
+            <p className="mt-2 text-sm text-ink-600">
+              ตรวจสอบภาพก่อนเปิดกล้องจริง
+            </p>
+            <div className="mt-5 aspect-video w-full overflow-hidden rounded-2xl border border-ink-900/10 bg-ink-900/5">
+              <video
+                ref={previewVideoRef}
+                className={`h-full w-full object-cover ${blurEnabled ? "blur-sm" : ""}`}
+                autoPlay
+                muted
+                playsInline
+              />
+            </div>
+            <div className="mt-4 flex items-center justify-between">
+              <label className="flex items-center gap-2 text-sm text-ink-700">
+                <input
+                  type="checkbox"
+                  checked={blurEnabled}
+                  onChange={(event) => setBlurEnabled(event.target.checked)}
+                  className="h-4 w-4 rounded border-ink-900/20 text-sky-500 focus:ring-sky-400"
+                />
+                เบลอพื้นหลัง
+              </label>
+              <span className="text-xs text-ink-500">
+                เบลอพื้นหลังสำหรับผู้ชมด้วย
+              </span>
+            </div>
+            {cameraPromptError && (
+              <p className="mt-3 text-xs text-rose-600">{cameraPromptError}</p>
+            )}
+            <div className="mt-6 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={handleCancelCamera}
+                className="rounded-full border border-ink-900/20 bg-white/70 px-4 py-2 text-xs font-semibold text-ink-700"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmCamera}
+                disabled={!previewStream}
+                className="rounded-full bg-sky-500 px-4 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-sky-200"
+              >
+                เปิดกล้อง
               </button>
             </div>
           </div>
@@ -985,7 +1161,7 @@ export default function Classroom() {
                 <div className="absolute bottom-3 right-3 h-28 w-40 overflow-hidden rounded-xl border border-white/40 bg-ink-900/5 shadow-sm">
                   <video
                     ref={localCameraRef}
-                    className="h-full w-full object-cover"
+                    className={`h-full w-full object-cover ${blurEnabled ? "blur-sm" : ""}`}
                     autoPlay
                     muted
                     playsInline
@@ -1030,7 +1206,7 @@ export default function Classroom() {
                   </>
                 )}
                 <button
-                  onClick={cameraEnabled ? handleStopCamera : handleStartCamera}
+                  onClick={cameraEnabled ? handleStopCamera : openCameraPreview}
                   className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-ink-900/20 bg-white/70 text-ink-800 shadow-sm transition hover:-translate-y-0.5 hover:border-ink-900/40"
                   title={cameraEnabled ? "ปิดกล้อง" : "เปิดกล้อง"}
                 >
