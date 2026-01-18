@@ -295,7 +295,14 @@ export default function Classroom() {
       rafId: null
     };
 
+    let lastResults = null;
+
     segmenter.onResults((results) => {
+      if (!results?.image) return;
+      lastResults = results;
+    });
+
+    const drawFrame = (results) => {
       if (!results?.image) return;
       if (
         canvas.width !== results.image.width ||
@@ -308,12 +315,10 @@ export default function Classroom() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       if (results.segmentationMask) {
-        // Foreground (person)
         ctx.drawImage(results.segmentationMask, 0, 0, canvas.width, canvas.height);
         ctx.globalCompositeOperation = "source-in";
         ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
-        // Background (blurred)
         ctx.globalCompositeOperation = "destination-over";
         ctx.filter = "blur(12px)";
         ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
@@ -322,7 +327,7 @@ export default function Classroom() {
         ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
       }
       ctx.globalCompositeOperation = "source-over";
-    });
+    };
 
     const processFrame = async () => {
       if (video.readyState >= 2) {
@@ -330,6 +335,11 @@ export default function Classroom() {
           await segmenter.send({ image: video });
         } catch (error) {
           // keep retrying on next frame
+        }
+        if (lastResults) {
+          drawFrame(lastResults);
+        } else {
+          drawFrame({ image: video });
         }
       }
       state.rafId = requestAnimationFrame(processFrame);
@@ -917,7 +927,8 @@ export default function Classroom() {
       processedStream
     };
     if (localCameraRef.current) {
-      localCameraRef.current.srcObject = processedStream;
+      localCameraRef.current.srcObject = new MediaStream([track]);
+      localCameraRef.current.play?.().catch(() => {});
     }
     setCameraEnabled(true);
     setCameraMode("processed");
