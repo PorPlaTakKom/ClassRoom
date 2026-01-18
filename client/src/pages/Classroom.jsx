@@ -158,10 +158,12 @@ export default function Classroom() {
   const [copyStatus, setCopyStatus] = useState("");
   const [showCameraPreview, setShowCameraPreview] = useState(false);
   const [previewStream, setPreviewStream] = useState(null);
+  const [previewRawStream, setPreviewRawStream] = useState(null);
   const previewVideoRef = useRef(null);
   const [blurEnabled, setBlurEnabled] = useState(false);
   const [cameraPromptError, setCameraPromptError] = useState("");
   const cameraPipelineRef = useRef(null);
+  const previewPipelineRef = useRef(null);
 
   useEffect(() => {
     let active = true;
@@ -234,7 +236,11 @@ export default function Classroom() {
 
   const stopPreviewStream = () => {
     previewStream?.getTracks().forEach((track) => track.stop());
+    previewRawStream?.getTracks().forEach((track) => track.stop());
+    previewPipelineRef.current?.stop?.();
+    previewPipelineRef.current = null;
     setPreviewStream(null);
+    setPreviewRawStream(null);
   };
 
   const loadSelfieSegmentation = async () => {
@@ -350,7 +356,14 @@ export default function Classroom() {
         },
         audio: false
       });
-      setPreviewStream(stream);
+      setPreviewRawStream(stream);
+      if (blurEnabled) {
+        const pipeline = await createBlurPipeline(stream);
+        previewPipelineRef.current = pipeline;
+        setPreviewStream(pipeline.processedStream);
+      } else {
+        setPreviewStream(stream);
+      }
       setShowCameraPreview(true);
     } catch (error) {
       const name = error?.name || "UnknownError";
@@ -368,6 +381,24 @@ export default function Classroom() {
     stopPreviewStream();
     setShowCameraPreview(false);
   };
+
+  useEffect(() => {
+    const updatePreview = async () => {
+      if (!showCameraPreview || !previewRawStream) return;
+      if (blurEnabled) {
+        if (!previewPipelineRef.current) {
+          const pipeline = await createBlurPipeline(previewRawStream);
+          previewPipelineRef.current = pipeline;
+          setPreviewStream(pipeline.processedStream);
+        }
+      } else {
+        previewPipelineRef.current?.stop?.();
+        previewPipelineRef.current = null;
+        setPreviewStream(previewRawStream);
+      }
+    };
+    updatePreview().catch(() => {});
+  }, [blurEnabled, showCameraPreview, previewRawStream]);
 
   useEffect(() => {
     let active = true;
@@ -1063,7 +1094,7 @@ export default function Classroom() {
             <div className="mt-5 aspect-video w-full overflow-hidden rounded-2xl border border-ink-900/10 bg-ink-900/5">
               <video
                 ref={previewVideoRef}
-                className={`h-full w-full object-cover ${blurEnabled ? "blur-sm" : ""}`}
+                className="h-full w-full object-cover"
                 autoPlay
                 muted
                 playsInline
@@ -1245,7 +1276,7 @@ export default function Classroom() {
                 <div className="absolute bottom-3 right-3 h-28 w-40 overflow-hidden rounded-xl border border-white/40 bg-ink-900/5 shadow-sm">
                   <video
                     ref={localCameraRef}
-                    className={`h-full w-full object-cover ${blurEnabled ? "blur-sm" : ""}`}
+                    className="h-full w-full object-cover"
                     autoPlay
                     muted
                     playsInline
