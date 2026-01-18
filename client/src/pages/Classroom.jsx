@@ -79,10 +79,13 @@ function LiveKitTeacherStream({ onStreamChange, className }) {
 
 function LiveKitStudentCameraSection() {
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: true });
-  const studentTracks = tracks.filter(
-    (track) =>
-      isStudentTrack(track) && getTrackSource(track) === Track.Source.Camera
-  );
+  const studentTracks = tracks.filter((track) => {
+    if (!isStudentTrack(track)) return false;
+    if (getTrackSource(track) !== Track.Source.Camera) return false;
+    if (!track.publication?.isSubscribed) return false;
+    if (track.publication?.isMuted) return false;
+    return Boolean(track.publication?.track);
+  });
 
   if (studentTracks.length === 0) return null;
 
@@ -824,15 +827,23 @@ export default function Classroom() {
   const content = (
     <main className="min-h-screen overflow-y-auto px-4 py-6 md:px-6">
       {currentUser?.role === "Student" && needsMediaAccess && (
-        <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          กรุณากดเพื่ออนุญาตไมค์/กล้องก่อนเข้าห้อง
-          <button
-            type="button"
-            onClick={requestMediaPermissions}
-            className="ml-3 rounded-full border border-rose-200 bg-white px-3 py-1 text-xs text-rose-700 transition hover:border-rose-300"
-          >
-            อนุญาต
-          </button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-sky-200/70 backdrop-blur-sm" />
+          <div className="relative z-10 w-full max-w-md rounded-3xl border border-ink-900/20 bg-white/90 p-6 text-ink-700 soft-shadow">
+            <h2 className="font-display text-xl text-ink-900">อนุญาตไมค์/กล้อง</h2>
+            <p className="mt-2 text-sm text-ink-600">
+              กรุณาอนุญาตไมค์และกล้องก่อนเข้าห้องเรียน
+            </p>
+            <div className="mt-6 flex items-center justify-end">
+              <button
+                type="button"
+                onClick={requestMediaPermissions}
+                className="rounded-full bg-sky-500 px-4 py-2 text-xs font-semibold text-white transition hover:bg-sky-400"
+              >
+                อนุญาต
+              </button>
+            </div>
+          </div>
         </div>
       )}
       {needsJoinProfile && (
