@@ -98,6 +98,31 @@ function LiveKitTeacherCameraPip() {
   );
 }
 
+function LiveKitTeacherCameraPipVideo({ onReady }) {
+  const tracks = useTracks([Track.Source.Camera], { onlySubscribed: true });
+  const teacherCameraTrack = tracks.find(
+    (track) => isTeacherTrack(track) && getTrackSource(track) === Track.Source.Camera
+  );
+  const videoRef = useRef(null);
+
+  useEffect(() => {
+    if (!videoRef.current) return;
+    if (teacherCameraTrack?.publication?.track) {
+      teacherCameraTrack.publication.track.attach(videoRef.current);
+      onReady?.(videoRef.current, true);
+      return () => {
+        teacherCameraTrack.publication.track.detach?.(videoRef.current);
+        onReady?.(videoRef.current, false);
+      };
+    }
+    onReady?.(videoRef.current, false);
+    videoRef.current.srcObject = null;
+    return undefined;
+  }, [teacherCameraTrack, onReady]);
+
+  return <video ref={videoRef} className="hidden" autoPlay muted playsInline />;
+}
+
 function LiveKitStudentCameraSection() {
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: true });
   const studentTracks = tracks.filter((track) => {
@@ -200,6 +225,8 @@ export default function Classroom() {
     typeof navigator !== "undefined" &&
     /safari/i.test(navigator.userAgent) &&
     !/chrome|chromium|edg/i.test(navigator.userAgent);
+  const teacherPipVideoRef = useRef(null);
+  const [teacherPipReady, setTeacherPipReady] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -1298,6 +1325,18 @@ export default function Classroom() {
   const handleFullscreen = async () => {
     const containerEl = liveVideoContainerRef.current;
     const videoEl = containerEl?.querySelector("video");
+    const pipVideoEl = teacherPipVideoRef.current;
+    const requestPip = async () => {
+      if (!pipVideoEl || !teacherPipReady) return;
+      if (document.pictureInPictureElement) return;
+      if (pipVideoEl.requestPictureInPicture) {
+        await pipVideoEl.requestPictureInPicture();
+        return;
+      }
+      if (pipVideoEl.webkitSetPresentationMode) {
+        pipVideoEl.webkitSetPresentationMode("picture-in-picture");
+      }
+    };
     if (document.fullscreenElement) {
       try {
         await document.exitFullscreen();
@@ -1309,15 +1348,18 @@ export default function Classroom() {
     if (containerEl?.requestFullscreen) {
       try {
         await containerEl.requestFullscreen();
+        await requestPip();
       } catch (error) {
         if (videoEl?.webkitEnterFullscreen) {
           videoEl.webkitEnterFullscreen();
+          await requestPip();
         }
       }
       return;
     }
     if (videoEl?.webkitEnterFullscreen) {
       videoEl.webkitEnterFullscreen();
+      await requestPip();
     }
   };
 
@@ -1684,6 +1726,14 @@ export default function Classroom() {
               )}
               {currentUser?.role === "Student" && liveKitRoom && (
                 <LiveKitTeacherCameraPip />
+              )}
+              {currentUser?.role === "Student" && liveKitRoom && (
+                <LiveKitTeacherCameraPipVideo
+                  onReady={(videoEl, ready) => {
+                    teacherPipVideoRef.current = videoEl;
+                    setTeacherPipReady(ready);
+                  }}
+                />
               )}
               {!isSharing && currentUser?.role === "Teacher" && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center text-ink-600">
