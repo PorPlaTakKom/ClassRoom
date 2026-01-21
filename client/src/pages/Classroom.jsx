@@ -164,6 +164,10 @@ export default function Classroom() {
   const [cameraPromptError, setCameraPromptError] = useState("");
   const cameraPipelineRef = useRef(null);
   const previewPipelineRef = useRef(null);
+  const isSafari =
+    typeof navigator !== "undefined" &&
+    /safari/i.test(navigator.userAgent) &&
+    !/chrome|chromium|edg/i.test(navigator.userAgent);
 
   useEffect(() => {
     let active = true;
@@ -254,6 +258,9 @@ export default function Classroom() {
   };
 
   const createBlurPipeline = async (stream) => {
+    if (isSafari) {
+      throw new Error("Safari does not support background blur");
+    }
     const video = document.createElement("video");
     video.autoplay = true;
     video.muted = true;
@@ -396,9 +403,14 @@ export default function Classroom() {
       });
       setPreviewRawStream(stream);
       if (blurEnabled) {
-        const pipeline = await createBlurPipeline(stream);
-        previewPipelineRef.current = pipeline;
-        setPreviewStream(pipeline.processedStream);
+        try {
+          const pipeline = await createBlurPipeline(stream);
+          previewPipelineRef.current = pipeline;
+          setPreviewStream(pipeline.processedStream);
+        } catch (error) {
+          setCameraPromptError("เบลอพื้นหลังยังไม่รองรับในเบราว์เซอร์นี้");
+          setPreviewStream(stream);
+        }
       } else {
         setPreviewStream(stream);
       }
@@ -425,9 +437,14 @@ export default function Classroom() {
       if (!showCameraPreview || !previewRawStream) return;
       if (blurEnabled) {
         if (!previewPipelineRef.current) {
-          const pipeline = await createBlurPipeline(previewRawStream);
-          previewPipelineRef.current = pipeline;
-          setPreviewStream(pipeline.processedStream);
+          try {
+            const pipeline = await createBlurPipeline(previewRawStream);
+            previewPipelineRef.current = pipeline;
+            setPreviewStream(pipeline.processedStream);
+          } catch (error) {
+            setCameraPromptError("เบลอพื้นหลังยังไม่รองรับในเบราว์เซอร์นี้");
+            setPreviewStream(previewRawStream);
+          }
         }
       } else {
         previewPipelineRef.current?.stop?.();
@@ -919,10 +936,32 @@ export default function Classroom() {
       },
       audio: false
     });
-    const { processedStream, stop } = await createBlurPipeline(stream);
+    let processedStream;
+    let stop;
+    try {
+      const pipeline = await createBlurPipeline(stream);
+      processedStream = pipeline.processedStream;
+      stop = pipeline.stop;
+    } catch (error) {
+      stream.getTracks().forEach((trackItem) => trackItem.stop());
+      setCameraError("เบลอพื้นหลังยังไม่รองรับในเบราว์เซอร์นี้");
+      setBlurEnabled(false);
+      await lkRoom.localParticipant.setCameraEnabled(true, {
+        width: 1280,
+        height: 720,
+        frameRate: 24
+      });
+      setCameraEnabled(true);
+      setCameraMode("native");
+      const publication = lkRoom.localParticipant.getTrackPublication(Track.Source.Camera);
+      if (publication?.track && localCameraRef.current) {
+        publication.track.attach(localCameraRef.current);
+      }
+      return;
+    }
     const track = processedStream.getVideoTracks()[0];
     if (!track) {
-      stop();
+      stop?.();
       stream.getTracks().forEach((trackItem) => trackItem.stop());
       throw new Error("Processed video track not available");
     }
