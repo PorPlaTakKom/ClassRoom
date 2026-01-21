@@ -159,6 +159,9 @@ export default function Classroom() {
   const [joinPreviewStream, setJoinPreviewStream] = useState(null);
   const joinPreviewRef = useRef(null);
   const [joinMediaError, setJoinMediaError] = useState("");
+  const [joinMicLevel, setJoinMicLevel] = useState(0);
+  const joinAudioCtxRef = useRef(null);
+  const joinMicFrameRef = useRef(null);
   const [needsJoinProfile, setNeedsJoinProfile] = useState(false);
   const [joinName, setJoinName] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
@@ -658,7 +661,7 @@ export default function Classroom() {
       socket.off("student-approved", handleStudentApproved);
       socket.off("class-closed", handleClassClosed);
     };
-  }, [room, roomId, currentUser, needsJoinProfile]);
+  }, [room, roomId, currentUser, needsJoinProfile, mediaCheckDone]);
 
   useEffect(() => {
     const supportsDisplayMedia = Boolean(
@@ -852,6 +855,42 @@ export default function Classroom() {
   }, [joinPreviewStream]);
 
   useEffect(() => {
+    const stream = joinPreviewStream;
+    if (!stream) return;
+    const [audioTrack] = stream.getAudioTracks();
+    if (!audioTrack) return;
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    joinAudioCtxRef.current = audioCtx;
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    const source = audioCtx.createMediaStreamSource(new MediaStream([audioTrack]));
+    source.connect(analyser);
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    const tick = () => {
+      analyser.getByteTimeDomainData(data);
+      let sum = 0;
+      for (let i = 0; i < data.length; i += 1) {
+        const v = (data[i] - 128) / 128;
+        sum += v * v;
+      }
+      const rms = Math.sqrt(sum / data.length);
+      setJoinMicLevel(Math.min(1, rms * 2));
+      joinMicFrameRef.current = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => {
+      if (joinMicFrameRef.current) {
+        cancelAnimationFrame(joinMicFrameRef.current);
+      }
+      source.disconnect();
+      analyser.disconnect();
+      audioCtx.close?.();
+      joinAudioCtxRef.current = null;
+      setJoinMicLevel(0);
+    };
+  }, [joinPreviewStream]);
+
+  useEffect(() => {
     if (!currentUser || currentUser.role !== "Student") {
       setShowJoinMediaCheck(false);
       return;
@@ -917,6 +956,7 @@ export default function Classroom() {
   const stopJoinPreview = () => {
     joinPreviewStream?.getTracks().forEach((track) => track.stop());
     setJoinPreviewStream(null);
+    setJoinMicLevel(0);
   };
 
   const openJoinMediaCheck = async () => {
@@ -1392,6 +1432,18 @@ export default function Classroom() {
                 muted
                 playsInline
               />
+            </div>
+            <div className="mt-4">
+              <div className="flex items-center justify-between text-xs text-ink-600">
+                <span>ระดับไมค์</span>
+                <span>{Math.round(joinMicLevel * 100)}%</span>
+              </div>
+              <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-ink-900/10">
+                <div
+                  className="h-full rounded-full bg-emerald-400 transition-[width]"
+                  style={{ width: `${Math.round(joinMicLevel * 100)}%` }}
+                />
+              </div>
             </div>
             {joinMediaError && (
               <p className="mt-3 text-xs text-rose-600">{joinMediaError}</p>
