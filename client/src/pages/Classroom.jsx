@@ -261,6 +261,12 @@ export default function Classroom() {
     if (isSafari) {
       throw new Error("Safari does not support background blur");
     }
+    const testCanvas = document.createElement("canvas");
+    const hasWebgl =
+      Boolean(testCanvas.getContext("webgl2")) || Boolean(testCanvas.getContext("webgl"));
+    if (!hasWebgl) {
+      throw new Error("WebGL not available");
+    }
     const video = document.createElement("video");
     video.autoplay = true;
     video.muted = true;
