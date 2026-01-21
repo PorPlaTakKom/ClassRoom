@@ -154,6 +154,11 @@ export default function Classroom() {
   const screenTracksRef = useRef([]);
   const [cameraMode, setCameraMode] = useState("off");
   const [localPreviewStream, setLocalPreviewStream] = useState(null);
+  const [mediaCheckDone, setMediaCheckDone] = useState(currentUser?.role === "Teacher");
+  const [showJoinMediaCheck, setShowJoinMediaCheck] = useState(false);
+  const [joinPreviewStream, setJoinPreviewStream] = useState(null);
+  const joinPreviewRef = useRef(null);
+  const [joinMediaError, setJoinMediaError] = useState("");
   const [needsJoinProfile, setNeedsJoinProfile] = useState(false);
   const [joinName, setJoinName] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
@@ -550,10 +555,16 @@ export default function Classroom() {
     } else {
       setNeedsJoinProfile(false);
     }
+    if (currentUser?.role !== "Teacher") {
+      setMediaCheckDone(false);
+    } else {
+      setMediaCheckDone(true);
+    }
   }, [currentUser, joinMode]);
 
   useEffect(() => {
     if (!room || !currentUser || needsJoinProfile) return;
+    if (currentUser.role === "Student" && !mediaCheckDone) return;
     const socket = getSocket();
 
     const handleConnect = () => {
@@ -831,6 +842,28 @@ export default function Classroom() {
   }, [cameraEnabled, localPreviewStream]);
 
   useEffect(() => {
+    if (!joinPreviewRef.current) return;
+    joinPreviewRef.current.srcObject = joinPreviewStream;
+    return () => {
+      if (joinPreviewRef.current) {
+        joinPreviewRef.current.srcObject = null;
+      }
+    };
+  }, [joinPreviewStream]);
+
+  useEffect(() => {
+    if (!currentUser || currentUser.role !== "Student") {
+      setShowJoinMediaCheck(false);
+      return;
+    }
+    if (needsJoinProfile || mediaCheckDone || classClosed) {
+      setShowJoinMediaCheck(false);
+      return;
+    }
+    setShowJoinMediaCheck(true);
+  }, [currentUser, needsJoinProfile, mediaCheckDone, classClosed]);
+
+  useEffect(() => {
     const lkRoom = liveKitRoomRef.current;
     if (!lkRoom || !localVideoRef.current) return;
     const publication = lkRoom.localParticipant.getTrackPublication(Track.Source.ScreenShare);
@@ -879,6 +912,40 @@ export default function Classroom() {
     setCurrentUser(nextUser);
     setApproved(false);
     setNeedsJoinProfile(false);
+  };
+
+  const stopJoinPreview = () => {
+    joinPreviewStream?.getTracks().forEach((track) => track.stop());
+    setJoinPreviewStream(null);
+  };
+
+  const openJoinMediaCheck = async () => {
+    setJoinMediaError("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true
+      });
+      setJoinPreviewStream(stream);
+    } catch (error) {
+      const name = error?.name || "UnknownError";
+      setJoinMediaError(`ไม่สามารถเปิดกล้อง/ไมค์ได้: ${name}`);
+    }
+  };
+
+  const handleConfirmJoinMedia = async () => {
+    if (!joinPreviewStream) {
+      await openJoinMediaCheck();
+    }
+    stopJoinPreview();
+    setMediaCheckDone(true);
+    setShowJoinMediaCheck(false);
+  };
+
+  const handleCancelJoinMedia = () => {
+    stopJoinPreview();
+    setShowJoinMediaCheck(false);
+    navigate("/login");
   };
 
   const handleUploadFile = async (event) => {
@@ -1305,6 +1372,54 @@ export default function Classroom() {
               >
                 เปิดกล้อง
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showJoinMediaCheck && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-sky-200/70 backdrop-blur-sm" />
+          <div className="relative z-10 w-full max-w-lg rounded-3xl border border-ink-900/20 bg-white/90 p-6 text-ink-700 soft-shadow">
+            <h2 className="font-display text-xl text-ink-900">ตรวจสอบกล้อง/ไมค์</h2>
+            <p className="mt-2 text-sm text-ink-600">
+              กรุณาตรวจสอบกล้องและไมค์ก่อนเข้าห้องเรียน
+            </p>
+            <div className="mt-5 aspect-video w-full overflow-hidden rounded-2xl border border-ink-900/10 bg-ink-900/5">
+              <video
+                ref={joinPreviewRef}
+                className="h-full w-full object-cover"
+                autoPlay
+                muted
+                playsInline
+              />
+            </div>
+            {joinMediaError && (
+              <p className="mt-3 text-xs text-rose-600">{joinMediaError}</p>
+            )}
+            <div className="mt-6 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={openJoinMediaCheck}
+                className="rounded-full border border-ink-900/20 bg-white/70 px-4 py-2 text-xs font-semibold text-ink-700"
+              >
+                เปิดพรีวิว
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleCancelJoinMedia}
+                  className="rounded-full border border-ink-900/20 bg-white/70 px-4 py-2 text-xs font-semibold text-ink-700"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmJoinMedia}
+                  className="rounded-full bg-sky-500 px-4 py-2 text-xs font-semibold text-white"
+                >
+                  เข้าเรียน
+                </button>
+              </div>
             </div>
           </div>
         </div>
