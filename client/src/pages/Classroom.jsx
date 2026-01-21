@@ -164,6 +164,7 @@ export default function Classroom() {
   const [cameraPromptError, setCameraPromptError] = useState("");
   const cameraPipelineRef = useRef(null);
   const previewPipelineRef = useRef(null);
+  const [previewStatus, setPreviewStatus] = useState("idle");
   const isSafari =
     typeof navigator !== "undefined" &&
     /safari/i.test(navigator.userAgent) &&
@@ -245,6 +246,7 @@ export default function Classroom() {
     previewPipelineRef.current = null;
     setPreviewStream(null);
     setPreviewRawStream(null);
+    setPreviewStatus("idle");
   };
 
   const loadSelfieSegmentation = async () => {
@@ -394,6 +396,22 @@ export default function Classroom() {
     cameraPipelineRef.current = null;
   };
 
+  const publishRawCamera = async (stream) => {
+    const lkRoom = liveKitRoomRef.current;
+    if (!lkRoom) return;
+    const rawTrack = stream.getVideoTracks()[0];
+    if (!rawTrack) throw new Error("Raw video track not available");
+    await lkRoom.localParticipant.publishTrack(rawTrack, {
+      source: Track.Source.Camera
+    });
+    if (localCameraRef.current) {
+      localCameraRef.current.srcObject = new MediaStream([rawTrack]);
+      localCameraRef.current.play?.().catch(() => {});
+    }
+    setCameraEnabled(true);
+    setCameraMode("native");
+  };
+
   const openCameraPreview = async () => {
     setCameraPromptError("");
     if (currentUser?.role === "Teacher" && isSharing) {
@@ -401,6 +419,7 @@ export default function Classroom() {
       return;
     }
     try {
+      setPreviewStatus("loading");
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           width: 1280,
@@ -410,29 +429,40 @@ export default function Classroom() {
         audio: false
       });
       setPreviewRawStream(stream);
+      setPreviewStream(stream);
+      setPreviewStatus("ready");
+      setShowCameraPreview(true);
+
       if (blurEnabled) {
         try {
-        const pipeline = await createBlurPipeline(stream);
-        previewPipelineRef.current = pipeline;
-        setPreviewStream(pipeline.processedStream);
-        setTimeout(() => {
-          if (previewPipelineRef.current?.state?.hasFrames) return;
-          previewPipelineRef.current?.stop?.();
-          previewPipelineRef.current = null;
+          const pipeline = await createBlurPipeline(stream);
+          previewPipelineRef.current = pipeline;
+          const tick = setInterval(() => {
+            if (!previewPipelineRef.current) {
+              clearInterval(tick);
+              return;
+            }
+            if (previewPipelineRef.current.state?.hasFrames) {
+              setPreviewStream(previewPipelineRef.current.processedStream);
+              clearInterval(tick);
+            }
+          }, 200);
+          setTimeout(() => {
+            if (previewPipelineRef.current?.state?.hasFrames) return;
+            previewPipelineRef.current?.stop?.();
+            previewPipelineRef.current = null;
+            setPreviewStream(stream);
+            setCameraPromptError("เบลอพื้นหลังยังไม่พร้อม กำลังใช้กล้องปกติ");
+          }, 1600);
+        } catch (error) {
+          setCameraPromptError("เบลอพื้นหลังยังไม่รองรับในเบราว์เซอร์นี้");
           setPreviewStream(stream);
-          setCameraPromptError("เบลอพื้นหลังยังไม่พร้อม กำลังใช้กล้องปกติ");
-        }, 1200);
-      } catch (error) {
-        setCameraPromptError("เบลอพื้นหลังยังไม่รองรับในเบราว์เซอร์นี้");
-        setPreviewStream(stream);
+        }
       }
-      } else {
-        setPreviewStream(stream);
-      }
-      setShowCameraPreview(true);
     } catch (error) {
       const name = error?.name || "UnknownError";
       setCameraPromptError(`ไม่สามารถเปิดพรีวิวกล้องได้: ${name}`);
+      setPreviewStatus("error");
     }
   };
 
@@ -455,14 +485,23 @@ export default function Classroom() {
           try {
             const pipeline = await createBlurPipeline(previewRawStream);
             previewPipelineRef.current = pipeline;
-            setPreviewStream(pipeline.processedStream);
+            const tick = setInterval(() => {
+              if (!previewPipelineRef.current) {
+                clearInterval(tick);
+                return;
+              }
+              if (previewPipelineRef.current.state?.hasFrames) {
+                setPreviewStream(previewPipelineRef.current.processedStream);
+                clearInterval(tick);
+              }
+            }, 200);
             setTimeout(() => {
               if (previewPipelineRef.current?.state?.hasFrames) return;
               previewPipelineRef.current?.stop?.();
               previewPipelineRef.current = null;
               setPreviewStream(previewRawStream);
               setCameraPromptError("เบลอพื้นหลังยังไม่พร้อม กำลังใช้กล้องปกติ");
-            }, 1200);
+            }, 1600);
           } catch (error) {
             setCameraPromptError("เบลอพื้นหลังยังไม่รองรับในเบราว์เซอร์นี้");
             setPreviewStream(previewRawStream);
@@ -975,17 +1014,15 @@ export default function Classroom() {
       stream.getTracks().forEach((trackItem) => trackItem.stop());
       setCameraError("เบลอพื้นหลังยังไม่รองรับในเบราว์เซอร์นี้");
       setBlurEnabled(false);
-      await lkRoom.localParticipant.setCameraEnabled(true, {
-        width: 1280,
-        height: 720,
-        frameRate: 24
+      const fallbackStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: 1280,
+          height: 720,
+          frameRate: 24
+        },
+        audio: false
       });
-      setCameraEnabled(true);
-      setCameraMode("native");
-      const publication = lkRoom.localParticipant.getTrackPublication(Track.Source.Camera);
-      if (publication?.track && localCameraRef.current) {
-        publication.track.attach(localCameraRef.current);
-      }
+      await publishRawCamera(fallbackStream);
       return;
     }
     const track = processedStream.getVideoTracks()[0];
@@ -1014,8 +1051,8 @@ export default function Classroom() {
     setTimeout(() => {
       if (cameraPipelineRef.current?.state?.hasFrames) return;
       setCameraError("เบลอพื้นหลังยังไม่พร้อม กำลังใช้กล้องปกติ");
-      handleStopCamera();
-      handleStartCamera();
+      stopCameraPipeline();
+      publishRawCamera(stream).catch(() => {});
     }, 1500);
   };
 
@@ -1230,7 +1267,7 @@ export default function Classroom() {
                 เบลอพื้นหลัง
               </label>
               <span className="text-xs text-ink-500">
-                เบลอพื้นหลังสำหรับผู้ชมด้วย
+                {previewStatus === "loading" ? "กำลังเตรียมพรีวิว..." : "เบลอพื้นหลังสำหรับผู้ชมด้วย"}
               </span>
             </div>
             {cameraPromptError && (
