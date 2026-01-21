@@ -1458,7 +1458,7 @@ export default function Classroom() {
             <div className="mt-5 aspect-video w-full overflow-hidden rounded-2xl border border-ink-900/10 bg-ink-900/5">
               <video
                 ref={previewVideoRef}
-                className="h-full w-full object-cover"
+                className="h-full w-full object-cover scale-x-[-1]"
                 autoPlay
                 muted
                 playsInline
@@ -1512,7 +1512,7 @@ export default function Classroom() {
             <div className="mt-5 aspect-video w-full overflow-hidden rounded-2xl border border-ink-900/10 bg-ink-900/5">
               <video
                 ref={joinPreviewRef}
-                className="h-full w-full object-cover"
+                className="h-full w-full object-cover scale-x-[-1]"
                 autoPlay
                 muted
                 playsInline
@@ -1751,15 +1751,11 @@ export default function Classroom() {
                   />
                 )
               )}
-              {cameraEnabled && (
-                <div
-                  className={`absolute bottom-3 z-10 h-28 w-40 overflow-hidden rounded-xl border border-white/40 bg-ink-900/5 shadow-sm ${
-                    currentUser?.role === "Student" ? "left-3" : "right-3"
-                  }`}
-                >
+              {currentUser?.role === "Teacher" && cameraEnabled && (
+                <div className="absolute bottom-3 right-3 z-10 h-28 w-40 overflow-hidden rounded-xl border border-white/40 bg-ink-900/5 shadow-sm">
                   <video
                     ref={localCameraRef}
-                    className="h-full w-full object-cover"
+                    className="h-full w-full object-cover scale-x-[-1]"
                     autoPlay
                     muted
                     playsInline
@@ -1908,6 +1904,20 @@ export default function Classroom() {
             {currentUser?.role === "Student" && (
               <div className="rounded-2xl border border-ink-900/10 bg-white/70 p-3 text-sm text-ink-700">
                 ครูผู้สอน: <span className="font-semibold text-ink-900">{room.teacherName}</span>
+              </div>
+            )}
+            {currentUser?.role === "Student" && cameraEnabled && (
+              <div className="mt-3 rounded-2xl border border-ink-900/10 bg-white/70 p-3">
+                <p className="text-xs font-semibold text-ink-600">กล้องของฉัน</p>
+                <div className="mt-2 overflow-hidden rounded-xl border border-white/40 bg-ink-900/5">
+                  <video
+                    ref={localCameraRef}
+                    className="h-28 w-full object-cover scale-x-[-1]"
+                    autoPlay
+                    muted
+                    playsInline
+                  />
+                </div>
               </div>
             )}
             {currentUser?.role === "Student" && approvedList.length > 0 && (
