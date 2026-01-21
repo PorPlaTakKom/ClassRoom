@@ -92,7 +92,7 @@ function LiveKitTeacherCameraPip() {
   if (!screenTrack || !cameraTrack) return null;
 
   return (
-    <div className="absolute bottom-3 right-3 h-28 w-40 overflow-hidden rounded-xl border border-white/40 bg-ink-900/5 shadow-sm">
+    <div className="absolute bottom-3 right-3 z-10 h-28 w-40 overflow-hidden rounded-xl border border-white/40 bg-ink-900/5 shadow-sm">
       <VideoTrack trackRef={cameraTrack} className="h-full w-full object-cover" />
     </div>
   );
@@ -123,8 +123,9 @@ function LiveKitTeacherCameraPipVideo({ onReady }) {
   return <video ref={videoRef} className="hidden" autoPlay muted playsInline />;
 }
 
-function LiveKitStudentCameraSection() {
+function LiveKitStudentCameraSection({ currentName, hideSelf = false }) {
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: true });
+  const normalizedSelf = normalizeName(currentName);
   const studentTracks = tracks.filter((track) => {
     if (!isStudentTrack(track)) return false;
     if (getTrackSource(track) !== Track.Source.Camera) return false;
@@ -132,14 +133,19 @@ function LiveKitStudentCameraSection() {
     if (track.publication?.isMuted) return false;
     return Boolean(track.publication?.track);
   });
+  const visibleTracks = hideSelf
+    ? studentTracks.filter(
+        (track) => normalizeName(getParticipantName(track.participant)) !== normalizedSelf
+      )
+    : studentTracks;
 
-  if (studentTracks.length === 0) return null;
+  if (visibleTracks.length === 0) return null;
 
   return (
     <div className="mt-4 rounded-2xl border border-ink-900/10 bg-white/70 p-4">
       <p className="text-xs font-semibold text-ink-600">กล้องนักเรียน</p>
       <div className="mt-3 grid grid-cols-2 gap-3">
-        {studentTracks.map((trackRef) => (
+        {visibleTracks.map((trackRef) => (
           <div key={getTrackKey(trackRef)} className="relative">
             <VideoTrack
               trackRef={trackRef}
@@ -225,8 +231,13 @@ export default function Classroom() {
     typeof navigator !== "undefined" &&
     /safari/i.test(navigator.userAgent) &&
     !/chrome|chromium|edg/i.test(navigator.userAgent);
+  const isMobileDevice =
+    typeof navigator !== "undefined" &&
+    /iphone|ipad|ipod|android/i.test(navigator.userAgent);
   const teacherPipVideoRef = useRef(null);
   const [teacherPipReady, setTeacherPipReady] = useState(false);
+  const [softFullscreen, setSoftFullscreen] = useState(false);
+  const isFullscreenActive = isFullscreen || softFullscreen;
 
   useEffect(() => {
     let active = true;
@@ -774,6 +785,15 @@ export default function Classroom() {
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
     };
   }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (softFullscreen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+  }, [softFullscreen]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1337,6 +1357,11 @@ export default function Classroom() {
         pipVideoEl.webkitSetPresentationMode("picture-in-picture");
       }
     };
+    if (isMobileDevice) {
+      setSoftFullscreen((prev) => !prev);
+      await requestPip();
+      return;
+    }
     if (document.fullscreenElement) {
       try {
         await document.exitFullscreen();
@@ -1685,7 +1710,7 @@ export default function Classroom() {
                       className="inline-flex items-center gap-1 rounded-full border border-ink-900/20 bg-white/70 px-3 py-1 text-xs text-ink-700 transition hover:border-ink-900/40"
                     >
                       <Maximize2 className="h-3 w-3" />
-                      {isFullscreen ? "ย่อหน้าจอ" : "เต็มจอ"}
+                      {isFullscreenActive ? "ย่อหน้าจอ" : "เต็มจอ"}
                     </button>
                   )}
                   <span className="rounded-full bg-sky-200/60 px-3 py-1 text-xs text-sky-700">
@@ -1695,8 +1720,21 @@ export default function Classroom() {
               </div>
             <div
               ref={liveVideoContainerRef}
-              className="relative mt-4 aspect-video w-full overflow-hidden rounded-2xl border bg-gradient-to-br from-white gray-50 to-gray-100"
+              className={`relative mt-4 aspect-video w-full overflow-hidden rounded-2xl border bg-gradient-to-br from-white gray-50 to-gray-100 ${
+                softFullscreen
+                  ? "fixed inset-0 z-50 m-0 h-screen w-screen rounded-none border-0"
+                  : ""
+              }`}
             >
+              {softFullscreen && (
+                <button
+                  type="button"
+                  onClick={() => setSoftFullscreen(false)}
+                  className="absolute right-3 top-3 z-20 rounded-full border border-ink-900/20 bg-white/80 px-3 py-1 text-xs text-ink-700"
+                >
+                  ย่อหน้าจอ
+                </button>
+              )}
               {currentUser?.role === "Teacher" ? (
                 <video
                   ref={localVideoRef}
@@ -1714,7 +1752,11 @@ export default function Classroom() {
                 )
               )}
               {cameraEnabled && (
-                <div className="absolute bottom-3 right-3 h-28 w-40 overflow-hidden rounded-xl border border-white/40 bg-ink-900/5 shadow-sm">
+                <div
+                  className={`absolute bottom-3 z-10 h-28 w-40 overflow-hidden rounded-xl border border-white/40 bg-ink-900/5 shadow-sm ${
+                    currentUser?.role === "Student" ? "left-3" : "right-3"
+                  }`}
+                >
                   <video
                     ref={localCameraRef}
                     className="h-full w-full object-cover"
@@ -1948,7 +1990,10 @@ export default function Classroom() {
             )}
 
             {currentUser?.role === "Teacher" && liveKitRoom && (
-              <LiveKitStudentCameraSection />
+              <LiveKitStudentCameraSection currentName={currentUser?.name} />
+            )}
+            {currentUser?.role === "Student" && liveKitRoom && (
+              <LiveKitStudentCameraSection currentName={currentUser?.name} hideSelf />
             )}
             <div className="mt-4 flex-1 space-y-3 overflow-y-auto pr-2">
               {messages.length === 0 ? (
