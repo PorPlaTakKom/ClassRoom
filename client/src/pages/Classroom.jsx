@@ -405,9 +405,16 @@ export default function Classroom() {
       source: Track.Source.Camera
     });
     if (localCameraRef.current) {
-      localCameraRef.current.srcObject = new MediaStream([rawTrack]);
+      localCameraRef.current.srcObject = stream;
       localCameraRef.current.play?.().catch(() => {});
     }
+    cameraPipelineRef.current = {
+      track: rawTrack,
+      stop: () => {},
+      originalStream: stream,
+      processedStream: stream,
+      state: { hasFrames: true }
+    };
     setCameraEnabled(true);
     setCameraMode("native");
   };
@@ -815,9 +822,10 @@ export default function Classroom() {
   useEffect(() => {
     const lkRoom = liveKitRoomRef.current;
     if (!lkRoom || !localCameraRef.current) return;
-    if (cameraMode === "processed") return;
+    if (cameraMode !== "off") return;
     const publication = lkRoom.localParticipant.getTrackPublication(Track.Source.Camera);
     if (!cameraEnabled || !publication?.track) return;
+    if (localCameraRef.current.srcObject) return;
     const track = publication.track;
     track.attach(localCameraRef.current);
     return () => track.detach?.(localCameraRef.current);
@@ -1042,7 +1050,7 @@ export default function Classroom() {
       state: cameraPipelineRef.current?.state ?? { hasFrames: false }
     };
     if (localCameraRef.current) {
-      localCameraRef.current.srcObject = new MediaStream([track]);
+      localCameraRef.current.srcObject = processedStream;
       localCameraRef.current.play?.().catch(() => {});
     }
     setCameraEnabled(true);
@@ -1082,17 +1090,15 @@ export default function Classroom() {
         await startBlurCamera();
         return;
       }
-      await lkRoom.localParticipant.setCameraEnabled(true, {
-        width: 1280,
-        height: 720,
-        frameRate: 24
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: 1280,
+          height: 720,
+          frameRate: 24
+        },
+        audio: false
       });
-      setCameraEnabled(true);
-      setCameraMode("native");
-      const publication = lkRoom.localParticipant.getTrackPublication(Track.Source.Camera);
-      if (publication?.track && localCameraRef.current) {
-        publication.track.attach(localCameraRef.current);
-      }
+      await publishRawCamera(stream);
     } catch (error) {
       const name = error?.name || "UnknownError";
       const message = error?.message || "Unknown reason";
@@ -1106,15 +1112,15 @@ export default function Classroom() {
       stopCameraPipeline();
     }
     if (lkRoom) {
-      lkRoom.localParticipant.setCameraEnabled(false);
       const publication = lkRoom.localParticipant.getTrackPublication(Track.Source.Camera);
-      if (publication?.track && localCameraRef.current) {
-        publication.track.detach(localCameraRef.current);
+      if (publication?.track) {
+        lkRoom.localParticipant.unpublishTrack(publication.track);
+      }
+      if (localCameraRef.current) {
+        localCameraRef.current.srcObject = null;
       }
     }
-    if (localCameraRef.current) {
-      localCameraRef.current.srcObject = null;
-    }
+    stopCameraPipeline();
     setCameraEnabled(false);
     setCameraMode("off");
     setCameraError("");
