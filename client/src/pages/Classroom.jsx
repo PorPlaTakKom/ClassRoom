@@ -1297,16 +1297,27 @@ export default function Classroom() {
 
   const handleFullscreen = async () => {
     const containerEl = liveVideoContainerRef.current;
+    const videoEl = containerEl?.querySelector("video");
     if (document.fullscreenElement) {
-      await document.exitFullscreen();
+      try {
+        await document.exitFullscreen();
+      } catch (error) {
+        // Ignore exit failures.
+      }
       return;
     }
     if (containerEl?.requestFullscreen) {
-      await containerEl.requestFullscreen();
+      try {
+        await containerEl.requestFullscreen();
+      } catch (error) {
+        if (videoEl?.webkitEnterFullscreen) {
+          videoEl.webkitEnterFullscreen();
+        }
+      }
       return;
     }
-    if (containerEl?.webkitEnterFullscreen) {
-      containerEl.webkitEnterFullscreen();
+    if (videoEl?.webkitEnterFullscreen) {
+      videoEl.webkitEnterFullscreen();
     }
   };
 
