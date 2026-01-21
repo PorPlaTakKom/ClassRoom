@@ -300,7 +300,8 @@ export default function Classroom() {
 
     const state = {
       rafId: null,
-      sending: false
+      sending: false,
+      hasFrames: false
     };
 
     let lastResults = null;
@@ -335,6 +336,7 @@ export default function Classroom() {
         ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
       }
       ctx.globalCompositeOperation = "source-over";
+      state.hasFrames = true;
     };
 
     const sendFrame = async () => {
@@ -371,7 +373,7 @@ export default function Classroom() {
       processedStream.getTracks().forEach((track) => track.stop());
     };
 
-    return { processedStream, stop };
+    return { processedStream, stop, state };
   };
 
   const stopCameraPipeline = async () => {
@@ -404,13 +406,20 @@ export default function Classroom() {
       setPreviewRawStream(stream);
       if (blurEnabled) {
         try {
-          const pipeline = await createBlurPipeline(stream);
-          previewPipelineRef.current = pipeline;
-          setPreviewStream(pipeline.processedStream);
-        } catch (error) {
-          setCameraPromptError("เบลอพื้นหลังยังไม่รองรับในเบราว์เซอร์นี้");
+        const pipeline = await createBlurPipeline(stream);
+        previewPipelineRef.current = pipeline;
+        setPreviewStream(pipeline.processedStream);
+        setTimeout(() => {
+          if (previewPipelineRef.current?.state?.hasFrames) return;
+          previewPipelineRef.current?.stop?.();
+          previewPipelineRef.current = null;
           setPreviewStream(stream);
-        }
+          setCameraPromptError("เบลอพื้นหลังยังไม่พร้อม กำลังใช้กล้องปกติ");
+        }, 1200);
+      } catch (error) {
+        setCameraPromptError("เบลอพื้นหลังยังไม่รองรับในเบราว์เซอร์นี้");
+        setPreviewStream(stream);
+      }
       } else {
         setPreviewStream(stream);
       }
@@ -441,6 +450,13 @@ export default function Classroom() {
             const pipeline = await createBlurPipeline(previewRawStream);
             previewPipelineRef.current = pipeline;
             setPreviewStream(pipeline.processedStream);
+            setTimeout(() => {
+              if (previewPipelineRef.current?.state?.hasFrames) return;
+              previewPipelineRef.current?.stop?.();
+              previewPipelineRef.current = null;
+              setPreviewStream(previewRawStream);
+              setCameraPromptError("เบลอพื้นหลังยังไม่พร้อม กำลังใช้กล้องปกติ");
+            }, 1200);
           } catch (error) {
             setCameraPromptError("เบลอพื้นหลังยังไม่รองรับในเบราว์เซอร์นี้");
             setPreviewStream(previewRawStream);
@@ -942,6 +958,13 @@ export default function Classroom() {
       const pipeline = await createBlurPipeline(stream);
       processedStream = pipeline.processedStream;
       stop = pipeline.stop;
+      cameraPipelineRef.current = {
+        track: null,
+        stop,
+        originalStream: stream,
+        processedStream,
+        state: pipeline.state
+      };
     } catch (error) {
       stream.getTracks().forEach((trackItem) => trackItem.stop());
       setCameraError("เบลอพื้นหลังยังไม่รองรับในเบราว์เซอร์นี้");
@@ -972,7 +995,8 @@ export default function Classroom() {
       track,
       stop,
       originalStream: stream,
-      processedStream
+      processedStream,
+      state: cameraPipelineRef.current?.state ?? { hasFrames: false }
     };
     if (localCameraRef.current) {
       localCameraRef.current.srcObject = new MediaStream([track]);
@@ -980,6 +1004,13 @@ export default function Classroom() {
     }
     setCameraEnabled(true);
     setCameraMode("processed");
+
+    setTimeout(() => {
+      if (cameraPipelineRef.current?.state?.hasFrames) return;
+      setCameraError("เบลอพื้นหลังยังไม่พร้อม กำลังใช้กล้องปกติ");
+      handleStopCamera();
+      handleStartCamera();
+    }, 1500);
   };
 
   const handleStartCamera = async () => {
