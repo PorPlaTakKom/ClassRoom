@@ -77,6 +77,27 @@ function LiveKitTeacherStream({ onStreamChange, className }) {
   return <VideoTrack trackRef={activeTrack} className={className} />;
 }
 
+function LiveKitTeacherCameraPip() {
+  const tracks = useTracks([Track.Source.ScreenShare, Track.Source.Camera], {
+    onlySubscribed: true
+  });
+  const teacherTracks = tracks.filter(isTeacherTrack);
+  const screenTrack = teacherTracks.find(
+    (track) => getTrackSource(track) === Track.Source.ScreenShare
+  );
+  const cameraTrack = teacherTracks.find(
+    (track) => getTrackSource(track) === Track.Source.Camera
+  );
+
+  if (!screenTrack || !cameraTrack) return null;
+
+  return (
+    <div className="absolute bottom-3 right-3 h-28 w-40 overflow-hidden rounded-xl border border-white/40 bg-ink-900/5 shadow-sm">
+      <VideoTrack trackRef={cameraTrack} className="h-full w-full object-cover" />
+    </div>
+  );
+}
+
 function LiveKitStudentCameraSection() {
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: true });
   const studentTracks = tracks.filter((track) => {
@@ -428,10 +449,6 @@ export default function Classroom() {
 
   const openCameraPreview = async () => {
     setCameraPromptError("");
-    if (currentUser?.role === "Teacher" && isSharing) {
-      setCameraPromptError("กรุณาหยุดแชร์หน้าจอก่อนเปิดกล้อง");
-      return;
-    }
     try {
       setPreviewStatus("loading");
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -1191,10 +1208,6 @@ export default function Classroom() {
   const handleStartCamera = async () => {
     setCameraError("");
     try {
-      if (currentUser?.role === "Teacher" && isSharing) {
-        setCameraError("กรุณาหยุดแชร์หน้าจอก่อนเปิดกล้อง");
-        return;
-      }
       const lkRoom = liveKitRoomRef.current;
       if (!lkRoom) {
         setCameraError("Live session ยังไม่พร้อม");
@@ -1651,6 +1664,9 @@ export default function Classroom() {
                     playsInline
                   />
                 </div>
+              )}
+              {currentUser?.role === "Student" && liveKitRoom && (
+                <LiveKitTeacherCameraPip />
               )}
               {!isSharing && currentUser?.role === "Teacher" && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center text-ink-600">
