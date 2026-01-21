@@ -1476,7 +1476,7 @@ export default function Classroom() {
           </div>
         </div>
       )}
-      {currentUser?.role === "Student" && !approved && !classClosed && (
+      {currentUser?.role === "Student" && !approved && !classClosed && mediaCheckDone && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-sky-200/70 backdrop-blur-sm" />
           <div className="relative z-10 flex items-center gap-3 rounded-2xl border border-ink-900/20 bg-white/90 px-6 py-4 text-sm text-ink-700 soft-shadow">
