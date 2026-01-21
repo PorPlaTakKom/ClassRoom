@@ -925,6 +925,12 @@ export default function Classroom() {
   }, [currentUser, needsJoinProfile, mediaCheckDone, classClosed, approved]);
 
   useEffect(() => {
+    if (!showJoinMediaCheck) return;
+    if (joinPreviewStream) return;
+    openJoinMediaCheck();
+  }, [showJoinMediaCheck, joinPreviewStream]);
+
+  useEffect(() => {
     const lkRoom = liveKitRoomRef.current;
     if (!lkRoom || !localVideoRef.current) return;
     const publication = lkRoom.localParticipant.getTrackPublication(Track.Source.ScreenShare);
