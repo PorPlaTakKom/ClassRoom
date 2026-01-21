@@ -1921,19 +1921,14 @@ export default function Classroom() {
             {currentUser?.role === "Student" && cameraEnabled && (
               <div className="mt-3 rounded-2xl border border-ink-900/10 bg-white/70 p-3">
                 <p className="text-xs font-semibold text-ink-600">กล้องของฉัน</p>
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  <div className="aspect-square overflow-hidden rounded-xl border border-white/40 bg-ink-900/5">
-                    <video
-                      ref={localCameraRef}
-                      className="h-full w-full object-cover scale-x-[-1]"
-                      autoPlay
-                      muted
-                      playsInline
-                    />
-                  </div>
-                  <div className="aspect-square rounded-xl border border-white/40 bg-ink-900/5" />
-                  <div className="aspect-square rounded-xl border border-white/40 bg-ink-900/5" />
-                  <div className="aspect-square rounded-xl border border-white/40 bg-ink-900/5" />
+                <div className="mt-2 aspect-square overflow-hidden rounded-xl border border-white/40 bg-ink-900/5">
+                  <video
+                    ref={localCameraRef}
+                    className="h-full w-full object-cover scale-x-[-1]"
+                    autoPlay
+                    muted
+                    playsInline
+                  />
                 </div>
               </div>
             )}
