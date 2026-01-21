@@ -227,6 +227,7 @@ export default function Classroom() {
   const cameraPipelineRef = useRef(null);
   const previewPipelineRef = useRef(null);
   const [previewStatus, setPreviewStatus] = useState("idle");
+  const [chatHidden, setChatHidden] = useState(false);
   const isSafari =
     typeof navigator !== "undefined" &&
     /safari/i.test(navigator.userAgent) &&
@@ -1683,6 +1684,13 @@ export default function Classroom() {
             )}
             {copyStatus && <span className="text-xs text-ink-600">{copyStatus}</span>}
             <span className="rounded-full border border-ink-900/15 px-3 py-1">{roleBadge}</span>
+            <button
+              type="button"
+              onClick={() => setChatHidden((prev) => !prev)}
+              className="rounded-full border border-ink-900/20 bg-white/70 px-3 py-1 text-xs text-ink-700 transition hover:border-ink-900/40"
+            >
+              {chatHidden ? "แสดงแชท" : "ซ่อนแชท"}
+            </button>
             {currentUser?.role === "Teacher" && (
               <button
                 type="button"
@@ -1695,7 +1703,11 @@ export default function Classroom() {
           </div>
         </header>
 
-        <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
+        <div
+          className={`grid gap-6 ${
+            chatHidden ? "lg:grid-cols-[2fr_1fr]" : "lg:grid-cols-[2fr_1fr_1fr]"
+          }`}
+        >
           <section className="glass-panel rounded-3xl p-4 md:p-6 soft-shadow">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -1909,14 +1921,19 @@ export default function Classroom() {
             {currentUser?.role === "Student" && cameraEnabled && (
               <div className="mt-3 rounded-2xl border border-ink-900/10 bg-white/70 p-3">
                 <p className="text-xs font-semibold text-ink-600">กล้องของฉัน</p>
-                <div className="mt-2 overflow-hidden rounded-xl border border-white/40 bg-ink-900/5">
-                  <video
-                    ref={localCameraRef}
-                    className="h-28 w-full object-cover scale-x-[-1]"
-                    autoPlay
-                    muted
-                    playsInline
-                  />
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <div className="aspect-square overflow-hidden rounded-xl border border-white/40 bg-ink-900/5">
+                    <video
+                      ref={localCameraRef}
+                      className="h-full w-full object-cover scale-x-[-1]"
+                      autoPlay
+                      muted
+                      playsInline
+                    />
+                  </div>
+                  <div className="aspect-square rounded-xl border border-white/40 bg-ink-900/5" />
+                  <div className="aspect-square rounded-xl border border-white/40 bg-ink-900/5" />
+                  <div className="aspect-square rounded-xl border border-white/40 bg-ink-900/5" />
                 </div>
               </div>
             )}
@@ -1944,7 +1961,7 @@ export default function Classroom() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <MessageCircle className="h-5 w-5 text-sky-600" />
-                <h2 className="font-display text-xl text-ink-900">Live Chat</h2>
+                <h2 className="font-display text-xl text-ink-900">ผู้เรียน</h2>
               </div>
               <span className="flex items-center gap-1 text-xs text-ink-600">
                 <Users2 className="h-4 w-4" />
@@ -1983,16 +2000,16 @@ export default function Classroom() {
                 ) : (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {approvedList.map((entry) => (
-                        <span
-                          key={entry.socketId}
-                          className={`rounded-full border px-3 py-1 text-xs ${
-                            speakingMap[normalizeName(entry.user?.name)]
-                              ? "border-emerald-300 bg-emerald-100 text-emerald-800 animate-pulse"
-                              : "border-ink-900/10 bg-white/70 text-ink-800"
-                          }`}
-                        >
-                          {entry.user?.name}
-                        </span>
+                      <span
+                        key={entry.socketId}
+                        className={`rounded-full border px-3 py-1 text-xs ${
+                          speakingMap[normalizeName(entry.user?.name)]
+                            ? "border-emerald-300 bg-emerald-100 text-emerald-800 animate-pulse"
+                            : "border-ink-900/10 bg-white/70 text-ink-800"
+                        }`}
+                      >
+                        {entry.user?.name}
+                      </span>
                     ))}
                   </div>
                 )}
@@ -2005,46 +2022,64 @@ export default function Classroom() {
             {currentUser?.role === "Student" && liveKitRoom && (
               <LiveKitStudentCameraSection currentName={currentUser?.name} hideSelf />
             )}
-            <div className="mt-4 flex-1 space-y-3 overflow-y-auto pr-2">
-              {messages.length === 0 ? (
-                <div className="rounded-2xl border border-ink-900/10 bg-white/70 p-4 text-sm text-ink-600">
-                  ยังไม่มีข้อความในห้องเรียนนี้
-                </div>
-              ) : (
-                messages.map((item, index) => (
-                  <div
-                    key={`${item.timestamp}-${index}`}
-                    className={`rounded-2xl px-4 py-3 text-sm ${
-                      item.user?.name === currentUser?.name
-                        ? "ml-auto bg-sky-200/70 text-ink-900"
-                        : "bg-white/80 text-ink-800"
-                    }`}
-                  >
-                    <p className="text-xs text-ink-500">{item.user?.name}</p>
-                    <p className="mt-1 text-sm text-ink-900">{item.message}</p>
-                  </div>
-                ))
-              )}
-              <div ref={chatEndRef} />
-            </div>
-
-            <form onSubmit={handleSend} className="mt-4 flex items-center gap-2">
-              <input
-                value={message}
-                onChange={(event) => setMessage(event.target.value)}
-                className="flex-1 rounded-2xl border border-ink-900/10 bg-white/70 px-4 py-3 text-sm text-ink-900 outline-none transition focus:border-sky-400"
-                placeholder={approved || currentUser?.role === "Teacher" ? "พิมพ์ข้อความ..." : "รออนุมัติเพื่อเริ่มแชท"}
-                disabled={!approved && currentUser?.role === "Student"}
-              />
-              <button
-                type="submit"
-                disabled={!approved && currentUser?.role === "Student"}
-                className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-500 text-white transition hover:-translate-y-0.5 hover:bg-sky-400 disabled:cursor-not-allowed disabled:bg-white/60"
-              >
-                <Send className="h-4 w-4" />
-              </button>
-            </form>
           </aside>
+          {!chatHidden && (
+            <aside className="glass-panel flex h-[640px] flex-col rounded-3xl p-4 md:h-[680px] md:p-6 soft-shadow">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <MessageCircle className="h-5 w-5 text-sky-600" />
+                  <h2 className="font-display text-xl text-ink-900">Live Chat</h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setChatHidden(true)}
+                  className="rounded-full border border-ink-900/20 bg-white/70 px-3 py-1 text-xs text-ink-700 transition hover:border-ink-900/40"
+                >
+                  ซ่อน
+                </button>
+              </div>
+
+              <div className="mt-4 flex-1 space-y-3 overflow-y-auto pr-2">
+                {messages.length === 0 ? (
+                  <div className="rounded-2xl border border-ink-900/10 bg-white/70 p-4 text-sm text-ink-600">
+                    ยังไม่มีข้อความในห้องเรียนนี้
+                  </div>
+                ) : (
+                  messages.map((item, index) => (
+                    <div
+                      key={`${item.timestamp}-${index}`}
+                      className={`rounded-2xl px-4 py-3 text-sm ${
+                        item.user?.name === currentUser?.name
+                          ? "ml-auto bg-sky-200/70 text-ink-900"
+                          : "bg-white/80 text-ink-800"
+                      }`}
+                    >
+                      <p className="text-xs text-ink-500">{item.user?.name}</p>
+                      <p className="mt-1 text-sm text-ink-900">{item.message}</p>
+                    </div>
+                  ))
+                )}
+                <div ref={chatEndRef} />
+              </div>
+
+              <form onSubmit={handleSend} className="mt-4 flex items-center gap-2">
+                <input
+                  value={message}
+                  onChange={(event) => setMessage(event.target.value)}
+                  className="flex-1 rounded-2xl border border-ink-900/10 bg-white/70 px-4 py-3 text-sm text-ink-900 outline-none transition focus:border-sky-400"
+                  placeholder={approved || currentUser?.role === "Teacher" ? "พิมพ์ข้อความ..." : "รออนุมัติเพื่อเริ่มแชท"}
+                  disabled={!approved && currentUser?.role === "Student"}
+                />
+                <button
+                  type="submit"
+                  disabled={!approved && currentUser?.role === "Student"}
+                  className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-500 text-white transition hover:-translate-y-0.5 hover:bg-sky-400 disabled:cursor-not-allowed disabled:bg-white/60"
+                >
+                  <Send className="h-4 w-4" />
+                </button>
+              </form>
+            </aside>
+          )}
         </div>
       </div>
     </main>
