@@ -1449,13 +1449,45 @@ export default function Classroom() {
               <p className="mt-3 text-xs text-rose-600">{joinMediaError}</p>
             )}
             <div className="mt-6 flex items-center justify-between">
-              <button
-                type="button"
-                onClick={openJoinMediaCheck}
-                className="rounded-full border border-ink-900/20 bg-white/70 px-4 py-2 text-xs font-semibold text-ink-700"
-              >
-                เปิดพรีวิว
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={joinPreviewStream ? stopJoinPreview : openJoinMediaCheck}
+                  className="rounded-full border border-ink-900/20 bg-white/70 px-4 py-2 text-xs font-semibold text-ink-700"
+                >
+                  {joinPreviewStream ? "ปิดพรีวิว" : "เปิดพรีวิว"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!joinPreviewStream) return;
+                    const videoTracks = joinPreviewStream.getVideoTracks();
+                    videoTracks.forEach((track) => {
+                      track.enabled = !track.enabled;
+                    });
+                    setJoinPreviewStream(new MediaStream([...joinPreviewStream.getTracks()]));
+                  }}
+                  disabled={!joinPreviewStream}
+                  className="rounded-full border border-ink-900/20 bg-white/70 px-4 py-2 text-xs font-semibold text-ink-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  เปิด/ปิดกล้อง
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!joinPreviewStream) return;
+                    const audioTracks = joinPreviewStream.getAudioTracks();
+                    audioTracks.forEach((track) => {
+                      track.enabled = !track.enabled;
+                    });
+                    setJoinPreviewStream(new MediaStream([...joinPreviewStream.getTracks()]));
+                  }}
+                  disabled={!joinPreviewStream}
+                  className="rounded-full border border-ink-900/20 bg-white/70 px-4 py-2 text-xs font-semibold text-ink-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  เปิด/ปิดไมค์
+                </button>
+              </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
