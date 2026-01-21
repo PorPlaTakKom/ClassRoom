@@ -162,6 +162,7 @@ export default function Classroom() {
   const [joinMicLevel, setJoinMicLevel] = useState(0);
   const joinAudioCtxRef = useRef(null);
   const joinMicFrameRef = useRef(null);
+  const mediaCheckKeyRef = useRef(null);
   const [needsJoinProfile, setNeedsJoinProfile] = useState(false);
   const [joinName, setJoinName] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
@@ -559,11 +560,15 @@ export default function Classroom() {
       setNeedsJoinProfile(false);
     }
     if (currentUser?.role !== "Teacher") {
-      setMediaCheckDone(false);
+      const key = `media-check:${roomId}:${currentUser?.name || "student"}`;
+      mediaCheckKeyRef.current = key;
+      const stored = typeof localStorage !== "undefined" ? localStorage.getItem(key) : null;
+      setMediaCheckDone(stored === "1");
     } else {
+      mediaCheckKeyRef.current = null;
       setMediaCheckDone(true);
     }
-  }, [currentUser, joinMode]);
+  }, [currentUser, joinMode, roomId]);
 
   useEffect(() => {
     if (!room || !currentUser || needsJoinProfile) return;
@@ -895,12 +900,12 @@ export default function Classroom() {
       setShowJoinMediaCheck(false);
       return;
     }
-    if (needsJoinProfile || mediaCheckDone || classClosed) {
+    if (needsJoinProfile || mediaCheckDone || classClosed || approved) {
       setShowJoinMediaCheck(false);
       return;
     }
     setShowJoinMediaCheck(true);
-  }, [currentUser, needsJoinProfile, mediaCheckDone, classClosed]);
+  }, [currentUser, needsJoinProfile, mediaCheckDone, classClosed, approved]);
 
   useEffect(() => {
     const lkRoom = liveKitRoomRef.current;
@@ -978,6 +983,9 @@ export default function Classroom() {
       await openJoinMediaCheck();
     }
     stopJoinPreview();
+    if (mediaCheckKeyRef.current && typeof localStorage !== "undefined") {
+      localStorage.setItem(mediaCheckKeyRef.current, "1");
+    }
     setMediaCheckDone(true);
     setShowJoinMediaCheck(false);
   };
@@ -1468,9 +1476,14 @@ export default function Classroom() {
                     setJoinPreviewStream(new MediaStream([...joinPreviewStream.getTracks()]));
                   }}
                   disabled={!joinPreviewStream}
-                  className="rounded-full border border-ink-900/20 bg-white/70 px-4 py-2 text-xs font-semibold text-ink-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-ink-900/20 bg-white/70 text-ink-800 shadow-sm transition hover:-translate-y-0.5 hover:border-ink-900/40 disabled:cursor-not-allowed disabled:opacity-60"
+                  title="เปิด/ปิดกล้อง"
                 >
-                  เปิด/ปิดกล้อง
+                  {joinPreviewStream?.getVideoTracks().some((track) => track.enabled) ? (
+                    <Camera className="h-4 w-4" />
+                  ) : (
+                    <CameraOff className="h-4 w-4" />
+                  )}
                 </button>
                 <button
                   type="button"
@@ -1483,9 +1496,14 @@ export default function Classroom() {
                     setJoinPreviewStream(new MediaStream([...joinPreviewStream.getTracks()]));
                   }}
                   disabled={!joinPreviewStream}
-                  className="rounded-full border border-ink-900/20 bg-white/70 px-4 py-2 text-xs font-semibold text-ink-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-ink-900/20 bg-white/70 text-ink-800 shadow-sm transition hover:-translate-y-0.5 hover:border-ink-900/40 disabled:cursor-not-allowed disabled:opacity-60"
+                  title="เปิด/ปิดไมค์"
                 >
-                  เปิด/ปิดไมค์
+                  {joinPreviewStream?.getAudioTracks().some((track) => track.enabled) ? (
+                    <Mic className="h-4 w-4" />
+                  ) : (
+                    <MicOff className="h-4 w-4" />
+                  )}
                 </button>
               </div>
               <div className="flex items-center gap-2">
