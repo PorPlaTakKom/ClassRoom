@@ -292,7 +292,8 @@ export default function Classroom() {
     segmenter.setOptions({ modelSelection: 1 });
 
     const state = {
-      rafId: null
+      rafId: null,
+      sending: false
     };
 
     let lastResults = null;
@@ -329,22 +330,30 @@ export default function Classroom() {
       ctx.globalCompositeOperation = "source-over";
     };
 
-    const processFrame = async () => {
+    const sendFrame = async () => {
+      if (state.sending || video.readyState < 2) return;
+      state.sending = true;
+      try {
+        await segmenter.send({ image: video });
+      } catch (error) {
+        // keep retrying on next frame
+      } finally {
+        state.sending = false;
+      }
+    };
+
+    const renderFrame = () => {
       if (video.readyState >= 2) {
-        try {
-          await segmenter.send({ image: video });
-        } catch (error) {
-          // keep retrying on next frame
-        }
         if (lastResults) {
           drawFrame(lastResults);
         } else {
           drawFrame({ image: video });
         }
+        sendFrame();
       }
-      state.rafId = requestAnimationFrame(processFrame);
+      state.rafId = requestAnimationFrame(renderFrame);
     };
-    state.rafId = requestAnimationFrame(processFrame);
+    state.rafId = requestAnimationFrame(renderFrame);
 
     const processedStream = canvas.captureStream(24);
 
