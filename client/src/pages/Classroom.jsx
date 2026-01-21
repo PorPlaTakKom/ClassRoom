@@ -153,6 +153,7 @@ export default function Classroom() {
   const localCameraRef = useRef(null);
   const screenTracksRef = useRef([]);
   const [cameraMode, setCameraMode] = useState("off");
+  const [localPreviewStream, setLocalPreviewStream] = useState(null);
   const [needsJoinProfile, setNeedsJoinProfile] = useState(false);
   const [joinName, setJoinName] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
@@ -404,10 +405,7 @@ export default function Classroom() {
     await lkRoom.localParticipant.publishTrack(rawTrack, {
       source: Track.Source.Camera
     });
-    if (localCameraRef.current) {
-      localCameraRef.current.srcObject = stream;
-      localCameraRef.current.play?.().catch(() => {});
-    }
+    setLocalPreviewStream(stream);
     cameraPipelineRef.current = {
       track: rawTrack,
       stop: () => {},
@@ -822,14 +820,15 @@ export default function Classroom() {
   useEffect(() => {
     const lkRoom = liveKitRoomRef.current;
     if (!lkRoom || !localCameraRef.current) return;
-    if (cameraMode !== "off") return;
-    const publication = lkRoom.localParticipant.getTrackPublication(Track.Source.Camera);
-    if (!cameraEnabled || !publication?.track) return;
-    if (localCameraRef.current.srcObject) return;
-    const track = publication.track;
-    track.attach(localCameraRef.current);
-    return () => track.detach?.(localCameraRef.current);
-  }, [cameraEnabled, cameraMode]);
+    if (!cameraEnabled || !localPreviewStream) return;
+    localCameraRef.current.srcObject = localPreviewStream;
+    localCameraRef.current.play?.().catch(() => {});
+    return () => {
+      if (localCameraRef.current) {
+        localCameraRef.current.srcObject = null;
+      }
+    };
+  }, [cameraEnabled, localPreviewStream]);
 
   useEffect(() => {
     const lkRoom = liveKitRoomRef.current;
@@ -1050,9 +1049,9 @@ export default function Classroom() {
       state: cameraPipelineRef.current?.state ?? { hasFrames: false }
     };
     if (localCameraRef.current) {
-      localCameraRef.current.srcObject = processedStream;
-      localCameraRef.current.play?.().catch(() => {});
+      // actual attachment happens in effect once the preview is mounted
     }
+    setLocalPreviewStream(processedStream);
     setCameraEnabled(true);
     setCameraMode("processed");
 
@@ -1121,6 +1120,7 @@ export default function Classroom() {
       }
     }
     stopCameraPipeline();
+    setLocalPreviewStream(null);
     setCameraEnabled(false);
     setCameraMode("off");
     setCameraError("");
