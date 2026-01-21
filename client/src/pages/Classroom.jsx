@@ -1704,17 +1704,17 @@ export default function Classroom() {
         </header>
 
         <div
-          className={`grid gap-6 ${
+          className={`grid grid-cols-1 gap-4 lg:gap-6 ${
             chatHidden ? "lg:grid-cols-[2fr_1fr]" : "lg:grid-cols-[2fr_1fr_1fr]"
           }`}
         >
           <section className="glass-panel rounded-3xl p-4 md:p-6 soft-shadow">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-3">
                   <Video className="h-5 w-5 text-sky-600" />
                   <h2 className="font-display text-xl text-ink-900">Live Video</h2>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {currentUser?.role === "Student" && (
                     <button
                       type="button"
@@ -1810,7 +1810,7 @@ export default function Classroom() {
                     <button
                       onClick={isSharing ? handleStopShare : handleStartShare}
                       disabled={!canShareScreen}
-                      className="rounded-full bg-sky-500 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-sky-200/70 transition hover:-translate-y-0.5 hover:bg-sky-400"
+                      className="w-full rounded-full bg-sky-500 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-sky-200/70 transition hover:-translate-y-0.5 hover:bg-sky-400 sm:w-auto"
                     >
                       {isSharing ? "หยุดแชร์หน้าจอ" : "เริ่มแชร์หน้าจอ"}
                     </button>
@@ -1911,7 +1911,7 @@ export default function Classroom() {
 
           </section>
 
-          <aside className="glass-panel flex h-[640px] flex-col rounded-3xl p-4 md:h-[680px] md:p-6 soft-shadow">
+          <aside className="glass-panel flex h-auto flex-col rounded-3xl p-4 md:h-[680px] md:p-6 soft-shadow">
             {liveKitRoom && <RoomAudioRenderer />}
             {currentUser?.role === "Student" && (
               <div className="rounded-2xl border border-ink-900/10 bg-white/70 p-3 text-sm text-ink-700">
@@ -1921,7 +1921,7 @@ export default function Classroom() {
             {currentUser?.role === "Student" && cameraEnabled && (
               <div className="mt-3 rounded-2xl border border-ink-900/10 bg-white/70 p-3">
                 <p className="text-xs font-semibold text-ink-600">กล้องของฉัน</p>
-                <div className="mt-2 aspect-square overflow-hidden rounded-xl border border-white/40 bg-ink-900/5">
+                <div className="mt-2 aspect-square w-32 overflow-hidden rounded-xl border border-white/40 bg-ink-900/5 sm:w-36">
                   <video
                     ref={localCameraRef}
                     className="h-full w-full object-cover scale-x-[-1]"
@@ -1958,10 +1958,12 @@ export default function Classroom() {
                 <MessageCircle className="h-5 w-5 text-sky-600" />
                 <h2 className="font-display text-xl text-ink-900">ผู้เรียน</h2>
               </div>
-              <span className="flex items-center gap-1 text-xs text-ink-600">
-                <Users2 className="h-4 w-4" />
-                {pending.length} pending
-              </span>
+              {pending.length > 0 && (
+                <span className="flex items-center gap-1 text-xs text-ink-600">
+                  <Users2 className="h-4 w-4" />
+                  {pending.length} pending
+                </span>
+              )}
             </div>
 
             {currentUser?.role === "Teacher" && pending.length > 0 && (
@@ -2019,7 +2021,7 @@ export default function Classroom() {
             )}
           </aside>
           {!chatHidden && (
-            <aside className="glass-panel flex h-[640px] flex-col rounded-3xl p-4 md:h-[680px] md:p-6 soft-shadow">
+            <aside className="glass-panel flex h-auto flex-col rounded-3xl p-4 md:h-[680px] md:p-6 soft-shadow">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <MessageCircle className="h-5 w-5 text-sky-600" />
@@ -2034,7 +2036,7 @@ export default function Classroom() {
                 </button>
               </div>
 
-              <div className="mt-4 flex-1 space-y-3 overflow-y-auto pr-2">
+              <div className="mt-4 flex-1 space-y-3 overflow-y-auto pr-2 max-h-[45vh] md:max-h-none">
                 {messages.length === 0 ? (
                   <div className="rounded-2xl border border-ink-900/10 bg-white/70 p-4 text-sm text-ink-600">
                     ยังไม่มีข้อความในห้องเรียนนี้
