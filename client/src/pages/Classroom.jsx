@@ -1052,7 +1052,17 @@ export default function Classroom() {
       if (cameraPipelineRef.current?.state?.hasFrames) return;
       setCameraError("เบลอพื้นหลังยังไม่พร้อม กำลังใช้กล้องปกติ");
       stopCameraPipeline();
-      publishRawCamera(stream).catch(() => {});
+      navigator.mediaDevices
+        .getUserMedia({
+          video: {
+            width: 1280,
+            height: 720,
+            frameRate: 24
+          },
+          audio: false
+        })
+        .then((fallbackStream) => publishRawCamera(fallbackStream))
+        .catch(() => {});
     }, 1500);
   };
 
