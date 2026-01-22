@@ -85,7 +85,13 @@ function LiveKitTeacherStream({ onStreamChange, className }) {
 
   if (!activeTrack) return null;
 
-  return <VideoTrack trackRef={activeTrack} className={className} />;
+  return (
+    <VideoTrack
+      key={getTrackKey(activeTrack)}
+      trackRef={activeTrack}
+      className={className}
+    />
+  );
 }
 
 function LiveKitTeacherCameraPip() {
@@ -891,6 +897,16 @@ export default function Classroom() {
           if (pub?.kind === Track.Kind.Video) {
             updateTeacherStreamStatus();
           }
+        });
+
+        lkRoom.on(RoomEvent.TrackUnpublished, (pub) => {
+          if (pub?.kind === Track.Kind.Video) {
+            updateTeacherStreamStatus();
+          }
+        });
+
+        lkRoom.on(RoomEvent.TrackSubscriptionStatusChanged, () => {
+          updateTeacherStreamStatus();
         });
 
         lkRoom.on(RoomEvent.ParticipantDisconnected, (participant) => {
