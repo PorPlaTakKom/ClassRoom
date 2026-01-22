@@ -837,6 +837,12 @@ export default function Classroom() {
           }
         });
 
+        lkRoom.on(RoomEvent.TrackSubscribed, (track) => {
+          if (track.kind === Track.Kind.Audio) {
+            lkRoom.startAudio().catch(() => {});
+          }
+        });
+
         lkRoom.on(RoomEvent.LocalTrackPublished, (publication) => {
           if (publication.source === Track.Source.ScreenShare) {
             if (localVideoRef.current && publication.track) {
@@ -884,6 +890,7 @@ export default function Classroom() {
         });
 
         await lkRoom.connect(data.url, token);
+        lkRoom.startAudio().catch(() => {});
         if (!active) {
           lkRoom.disconnect();
           return;

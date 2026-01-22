@@ -7,6 +7,10 @@ services:
     command: livekit-server
     environment:
       LIVEKIT_KEYS: ${LIVEKIT_KEYS}
+      LIVEKIT_CONFIG: |
+        rtc:
+          use_external_ip: true
+          node_ip: 43.209.129.125
     ports:
       - "7880:7880"                     # HTTP / WS
       - "7881:7881"                     # TCP RTC fallback
@@ -24,8 +28,8 @@ services:
       LIVEKIT_URL: ${LIVEKIT_URL}
     depends_on:
       - livekit
-    expose:
-      - "4000"
+    ports:
+      - "4000:4000"
     restart: unless-stopped
 
   client:
