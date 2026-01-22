@@ -238,13 +238,9 @@ export default function Classroom() {
     typeof navigator !== "undefined" &&
     /safari/i.test(navigator.userAgent) &&
     !/chrome|chromium|edg/i.test(navigator.userAgent);
-  const isMobileDevice =
-    typeof navigator !== "undefined" &&
-    /iphone|ipad|ipod|android/i.test(navigator.userAgent);
   const teacherPipVideoRef = useRef(null);
   const [teacherPipReady, setTeacherPipReady] = useState(false);
-  const [softFullscreen, setSoftFullscreen] = useState(false);
-  const isFullscreenActive = isFullscreen || softFullscreen;
+  const isFullscreenActive = isFullscreen;
   const isLowBandwidth =
     saveData || ["2g", "3g", "slow-2g"].includes(connectionType);
   const cameraConstraints = isLowBandwidth
@@ -798,15 +794,6 @@ export default function Classroom() {
   }, []);
 
   useEffect(() => {
-    if (typeof document === "undefined") return;
-    if (softFullscreen) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "";
-    }
-  }, [softFullscreen]);
-
-  useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
 
@@ -1351,11 +1338,6 @@ export default function Classroom() {
         pipVideoEl.webkitSetPresentationMode("picture-in-picture");
       }
     };
-    if (isMobileDevice) {
-      setSoftFullscreen((prev) => !prev);
-      await requestPip();
-      return;
-    }
     if (document.fullscreenElement) {
       try {
         await document.exitFullscreen();
@@ -1725,21 +1707,8 @@ export default function Classroom() {
               </div>
             <div
               ref={liveVideoContainerRef}
-              className={`relative mt-4 aspect-video w-full overflow-hidden rounded-2xl border bg-gradient-to-br from-white gray-50 to-gray-100 ${
-                softFullscreen
-                  ? "fixed inset-0 z-50 m-0 h-screen w-screen rounded-none border-0"
-                  : ""
-              }`}
+              className="relative mt-4 aspect-video w-full overflow-hidden rounded-2xl border bg-gradient-to-br from-white gray-50 to-gray-100"
             >
-              {softFullscreen && (
-                <button
-                  type="button"
-                  onClick={() => setSoftFullscreen(false)}
-                  className="absolute right-3 top-3 z-20 rounded-full border border-ink-900/20 bg-white/80 px-3 py-1 text-xs text-ink-700"
-                >
-                  ย่อหน้าจอ
-                </button>
-              )}
               {currentUser?.role === "Teacher" ? (
                 <video
                   ref={localVideoRef}
