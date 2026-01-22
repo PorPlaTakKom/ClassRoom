@@ -45,8 +45,16 @@ const isTeacherTrack = (trackRef) =>
 const isStudentTrack = (trackRef) =>
   trackRef?.participant?.metadata === "Student";
 
-const isTrackActive = (trackRef) =>
-  Boolean(trackRef?.publication?.track) && !trackRef?.publication?.isMuted;
+const isTrackActive = (trackRef) => {
+  const publication = trackRef?.publication;
+  const track = publication?.track;
+  const mediaTrack = track?.mediaStreamTrack;
+  if (!publication?.isSubscribed) return false;
+  if (!track) return false;
+  if (publication.isMuted) return false;
+  if (mediaTrack?.readyState && mediaTrack.readyState !== "live") return false;
+  return true;
+};
 
 const getTrackKey = (trackRef) => {
   const participantId = trackRef?.participant?.sid || "participant";
