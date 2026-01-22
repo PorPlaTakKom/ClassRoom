@@ -261,11 +261,27 @@ export default function Classroom() {
   const isLowBandwidth =
     saveData || ["2g", "3g", "slow-2g"].includes(connectionType);
   const cameraConstraints = isLowBandwidth
-    ? { width: 640, height: 360, frameRate: 20 }
-    : { width: 1280, height: 720, frameRate: 24 };
+    ? {
+        width: { ideal: 640, max: 1280 },
+        height: { ideal: 360, max: 720 },
+        frameRate: 20
+      }
+    : {
+        width: { ideal: 1280, max: 1280 },
+        height: { ideal: 720, max: 720 },
+        frameRate: 24
+      };
   const screenShareConstraints = isLowBandwidth
-    ? { width: 1280, height: 720, frameRate: 15 }
-    : { width: 1920, height: 1080, frameRate: 30 };
+    ? {
+        width: { ideal: 1280, max: 1920 },
+        height: { ideal: 720, max: 1080 },
+        frameRate: 15
+      }
+    : {
+        width: { ideal: 1920, max: 1920 },
+        height: { ideal: 1080, max: 1080 },
+        frameRate: 30
+      };
 
   useEffect(() => {
     let active = true;
