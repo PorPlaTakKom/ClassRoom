@@ -831,6 +831,27 @@ export default function Classroom() {
         });
         setLiveKitRoom(lkRoom);
 
+        const updateTeacherStreamStatus = () => {
+          if (currentUser?.role !== "Student") return;
+          const teacher = Array.from(lkRoom.participants.values()).find(
+            (participant) => participant.metadata === "Teacher"
+          );
+          if (!teacher) {
+            setHasRemoteStream(false);
+            return;
+          }
+          let hasActive = false;
+          teacher.videoTrackPublications.forEach((pub) => {
+            const track = pub.track;
+            if (!pub.isSubscribed) return;
+            if (pub.isMuted) return;
+            if (!track) return;
+            if (track.mediaStreamTrack?.readyState === "ended") return;
+            hasActive = true;
+          });
+          setHasRemoteStream(hasActive);
+        };
+
         lkRoom.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
           const next = {};
           speakers.forEach((participant) => {
@@ -848,6 +869,33 @@ export default function Classroom() {
         lkRoom.on(RoomEvent.TrackSubscribed, (track) => {
           if (track.kind === Track.Kind.Audio) {
             lkRoom.startAudio().catch(() => {});
+          }
+          if (track.kind === Track.Kind.Video) {
+            updateTeacherStreamStatus();
+          }
+        });
+
+        lkRoom.on(RoomEvent.TrackUnsubscribed, (track) => {
+          if (track.kind === Track.Kind.Video) {
+            updateTeacherStreamStatus();
+          }
+        });
+
+        lkRoom.on(RoomEvent.TrackMuted, (pub) => {
+          if (pub?.kind === Track.Kind.Video) {
+            updateTeacherStreamStatus();
+          }
+        });
+
+        lkRoom.on(RoomEvent.TrackUnmuted, (pub) => {
+          if (pub?.kind === Track.Kind.Video) {
+            updateTeacherStreamStatus();
+          }
+        });
+
+        lkRoom.on(RoomEvent.ParticipantDisconnected, (participant) => {
+          if (participant?.metadata === "Teacher") {
+            setHasRemoteStream(false);
           }
         });
 
@@ -899,6 +947,7 @@ export default function Classroom() {
 
         await lkRoom.connect(data.url, token);
         lkRoom.startAudio().catch(() => {});
+        updateTeacherStreamStatus();
         if (!active) {
           lkRoom.disconnect();
           return;
