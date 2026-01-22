@@ -839,8 +839,10 @@ export default function Classroom() {
 
         const updateTeacherStreamStatus = () => {
           if (currentUser?.role !== "Student") return;
-          const teacher = Array.from(lkRoom.participants.values()).find(
-            (participant) => participant.metadata === "Teacher"
+          const participantMap =
+            lkRoom.participants || lkRoom.remoteParticipants || new Map();
+          const teacher = Array.from(participantMap.values()).find(
+            (participant) => participant?.metadata === "Teacher"
           );
           if (!teacher) {
             setHasRemoteStream(false);
