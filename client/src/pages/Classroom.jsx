@@ -45,6 +45,9 @@ const isTeacherTrack = (trackRef) =>
 const isStudentTrack = (trackRef) =>
   trackRef?.participant?.metadata === "Student";
 
+const isTrackActive = (trackRef) =>
+  Boolean(trackRef?.publication?.track) && !trackRef?.publication?.isMuted;
+
 const getTrackKey = (trackRef) => {
   const participantId = trackRef?.participant?.sid || "participant";
   const trackId =
@@ -59,7 +62,7 @@ function LiveKitTeacherStream({ onStreamChange, className }) {
   const tracks = useTracks([Track.Source.ScreenShare, Track.Source.Camera], {
     onlySubscribed: true
   });
-  const teacherTracks = tracks.filter(isTeacherTrack);
+  const teacherTracks = tracks.filter((trackRef) => isTeacherTrack(trackRef) && isTrackActive(trackRef));
   const screenTrack = teacherTracks.find(
     (track) => getTrackSource(track) === Track.Source.ScreenShare
   );
@@ -81,7 +84,7 @@ function LiveKitTeacherCameraPip() {
   const tracks = useTracks([Track.Source.ScreenShare, Track.Source.Camera], {
     onlySubscribed: true
   });
-  const teacherTracks = tracks.filter(isTeacherTrack);
+  const teacherTracks = tracks.filter((trackRef) => isTeacherTrack(trackRef) && isTrackActive(trackRef));
   const screenTrack = teacherTracks.find(
     (track) => getTrackSource(track) === Track.Source.ScreenShare
   );
@@ -101,7 +104,10 @@ function LiveKitTeacherCameraPip() {
 function LiveKitTeacherCameraPipVideo({ onReady }) {
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: true });
   const teacherCameraTrack = tracks.find(
-    (track) => isTeacherTrack(track) && getTrackSource(track) === Track.Source.Camera
+    (track) =>
+      isTeacherTrack(track) &&
+      getTrackSource(track) === Track.Source.Camera &&
+      isTrackActive(track)
   );
   const videoRef = useRef(null);
 
@@ -239,6 +245,14 @@ export default function Classroom() {
   const [teacherPipReady, setTeacherPipReady] = useState(false);
   const [softFullscreen, setSoftFullscreen] = useState(false);
   const isFullscreenActive = isFullscreen || softFullscreen;
+  const isLowBandwidth =
+    saveData || ["2g", "3g", "slow-2g"].includes(connectionType);
+  const cameraConstraints = isLowBandwidth
+    ? { width: 640, height: 360, frameRate: 20 }
+    : { width: 1280, height: 720, frameRate: 24 };
+  const screenShareConstraints = isLowBandwidth
+    ? { width: 1280, height: 720, frameRate: 15 }
+    : { width: 1920, height: 1080, frameRate: 30 };
 
   useEffect(() => {
     let active = true;
@@ -491,11 +505,7 @@ export default function Classroom() {
     try {
       setPreviewStatus("loading");
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: 1280,
-          height: 720,
-          frameRate: 24
-        },
+        video: cameraConstraints,
         audio: false
       });
       setPreviewRawStream(stream);
@@ -819,7 +829,10 @@ export default function Classroom() {
         }
         const lkRoom = new Room({
           adaptiveStream: true,
-          dynacast: true
+          dynacast: true,
+          publishDefaults: {
+            simulcast: true
+          }
         });
         setLiveKitRoom(lkRoom);
 
@@ -1039,7 +1052,7 @@ export default function Classroom() {
     setJoinMediaError("");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
+        video: cameraConstraints,
         audio: true
       });
       setJoinPreviewStream(stream);
@@ -1129,11 +1142,7 @@ export default function Classroom() {
       }
       const tracks = await createLocalScreenTracks({
         audio: true,
-        video: {
-          width: 1920,
-          height: 1080,
-          frameRate: 30
-        }
+        video: screenShareConstraints
       });
       screenTracksRef.current = tracks;
       await Promise.all(tracks.map((track) => lkRoom.localParticipant.publishTrack(track)));
@@ -1183,11 +1192,7 @@ export default function Classroom() {
     }
     await stopCameraPipeline();
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        width: 1280,
-        height: 720,
-        frameRate: 24
-      },
+      video: cameraConstraints,
       audio: false
     });
     let processedStream;
@@ -1208,11 +1213,7 @@ export default function Classroom() {
       setCameraError("เบลอพื้นหลังยังไม่รองรับในเบราว์เซอร์นี้");
       setBlurEnabled(false);
       const fallbackStream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: 1280,
-          height: 720,
-          frameRate: 24
-        },
+        video: cameraConstraints,
         audio: false
       });
       await publishRawCamera(fallbackStream);
@@ -1247,11 +1248,7 @@ export default function Classroom() {
       stopCameraPipeline();
       navigator.mediaDevices
         .getUserMedia({
-          video: {
-            width: 1280,
-            height: 720,
-            frameRate: 24
-          },
+          video: cameraConstraints,
           audio: false
         })
         .then((fallbackStream) => publishRawCamera(fallbackStream))
@@ -1272,11 +1269,7 @@ export default function Classroom() {
         return;
       }
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: 1280,
-          height: 720,
-          frameRate: 24
-        },
+        video: cameraConstraints,
         audio: false
       });
       await publishRawCamera(stream);
