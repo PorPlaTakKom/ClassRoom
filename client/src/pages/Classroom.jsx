@@ -127,11 +127,14 @@ function LiveKitTeacherCameraPipVideo({ onReady }) {
 
   useEffect(() => {
     if (!videoRef.current) return;
-    if (teacherCameraTrack?.publication?.track) {
-      teacherCameraTrack.publication.track.attach(videoRef.current);
+    const mediaTrack = teacherCameraTrack?.publication?.track;
+    if (mediaTrack && videoRef.current) {
+      mediaTrack.attach(videoRef.current);
       onReady?.(videoRef.current, true);
       return () => {
-        teacherCameraTrack.publication.track.detach?.(videoRef.current);
+        if (mediaTrack?.detach && videoRef.current) {
+          mediaTrack.detach(videoRef.current);
+        }
         onReady?.(videoRef.current, false);
       };
     }
